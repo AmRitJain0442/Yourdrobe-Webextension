@@ -28,7 +28,7 @@ const numberKeys = new Set<keyof ProfileAttributes>(["height_cm", "chest_cm", "w
 export function ProfileManager({ profile, legacyImage, onChanged, onClose }: Props) {
   const [attributes, setAttributes] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(profile?.attributes ?? {}).map(([key, value]) => [key, String(value)])));
   const [legacyRole, setLegacyRole] = useState<PhotoRole>("face_front");
-  const [legacyConsent, setLegacyConsent] = useState(false);
+  const [consent, setConsent] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const mutation = useRef(false);
@@ -64,7 +64,7 @@ export function ProfileManager({ profile, legacyImage, onChanged, onClose }: Pro
 
   async function assignLegacy() {
     if (mutation.current) return;
-    if (!legacyConsent) { setError("Agree to browser-local storage and per-run transmission before assigning this photo."); return; }
+    if (!consent) { setError("Agree to browser-local storage and per-run transmission before assigning this photo."); return; }
     await runMutation(async () => { await assignLegacyImage(legacyRole); await onChanged(); }, "We could not assign that photo.");
   }
 
@@ -76,6 +76,7 @@ export function ProfileManager({ profile, legacyImage, onChanged, onClose }: Pro
   async function save(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (mutation.current) return;
+    if (!profile && !consent) { setError("Agree to browser-local storage and per-run transmission before saving attributes."); return; }
     const next: ProfileAttributes = {};
     for (const group of attributeGroups) for (const field of group.fields) {
       const value = attributes[field.key]?.trim();
@@ -104,7 +105,8 @@ export function ProfileManager({ profile, legacyImage, onChanged, onClose }: Pro
       <label>Replace photo<input type="file" disabled={busy} accept="image/jpeg,image/png,image/webp" onChange={(event) => void replace(role, event.target.files?.[0])} /></label>
       <button type="button" className="secondary" disabled={busy} onClick={() => void removeAsset(role)}>Delete photo</button>
     </article>)}</div>
-    {legacyImage && <article className="profile-asset legacy-image"><h3>Unclassified existing photo</h3><img src={legacyImage} alt="Unclassified existing photo" /><label>Photo role<select disabled={busy} value={legacyRole} onChange={(event) => setLegacyRole(event.target.value as PhotoRole)}>{roles.map((role) => <option key={role} value={role}>{labels[role]}</option>)}</select></label><label className="check"><input type="checkbox" disabled={busy} checked={legacyConsent} onChange={(event) => setLegacyConsent(event.target.checked)} />I agree to browser-local profile storage and per-run transmission of required photos and optional attributes to 127.0.0.1:8001.</label><button type="button" disabled={busy} onClick={() => void assignLegacy()}>Assign photo</button><button type="button" className="secondary" disabled={busy} onClick={() => void removeLegacy()}>Delete old photo</button></article>}
+    {(legacyImage || !profile) && <label className="check"><input type="checkbox" disabled={busy} checked={consent} onChange={(event) => setConsent(event.target.checked)} />I agree to browser-local profile storage and per-run transmission of required photos and optional attributes to 127.0.0.1:8001.</label>}
+    {legacyImage && <article className="profile-asset legacy-image"><h3>Unclassified existing photo</h3><img src={legacyImage} alt="Unclassified existing photo" /><label>Photo role<select disabled={busy} value={legacyRole} onChange={(event) => setLegacyRole(event.target.value as PhotoRole)}>{roles.map((role) => <option key={role} value={role}>{labels[role]}</option>)}</select></label><button type="button" disabled={busy} onClick={() => void assignLegacy()}>Assign photo</button><button type="button" className="secondary" disabled={busy} onClick={() => void removeLegacy()}>Delete old photo</button></article>}
     <form onSubmit={(event) => void save(event)}><h3>Optional attributes</h3>{attributeGroups.map((group) => <fieldset disabled={busy} key={group.title}><legend>{group.title}</legend>{group.fields.map((field) => <label key={field.key}>{field.label}<input name={field.key} type={field.number ? "number" : "text"} min={field.number ? "0.1" : undefined} step={field.number ? field.step ?? "0.1" : undefined} value={attributes[field.key] ?? ""} onChange={(event) => setAttributes((current) => ({ ...current, [field.key]: event.target.value }))} /></label>)}</fieldset>)}<button type="submit" disabled={busy}>Save attributes</button></form>
     {error && <p className="error" role="alert">{error}</p>}
     <button type="button" className="danger" disabled={busy} onClick={() => void removeProfile()}>Delete complete profile</button>

@@ -18,9 +18,14 @@ const profile: ProfileMetadata = {
   assets: { face_front: { role: "face_front", mime_type: "image/jpeg", width: 800, height: 800, byte_size: 10, updated_at: "2026-08-15T00:00:00.000Z" } },
 };
 
-async function renderManager(onChanged = vi.fn(), onClose = vi.fn()) {
+async function renderManager(
+  onChanged = vi.fn(),
+  onClose = vi.fn(),
+  currentProfile: ProfileMetadata | null = profile,
+  legacyImage: string | null = "data:image/jpeg;base64,cGhvdG8=",
+) {
   await act(async () => {
-    root.render(<ProfileManager profile={profile} legacyImage="data:image/jpeg;base64,cGhvdG8=" onChanged={onChanged} onClose={onClose} />);
+    root.render(<ProfileManager profile={currentProfile} legacyImage={legacyImage} onChanged={onChanged} onClose={onClose} />);
   });
   return { onChanged, onClose };
 }
@@ -134,5 +139,25 @@ describe("ProfileManager", () => {
     expect((host.querySelector("form") as HTMLFormElement).checkValidity()).toBe(true);
     await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Save attributes")?.click(); });
     expect(saveAttributes).toHaveBeenCalledWith(expect.objectContaining({ height_cm: 170 }));
+  });
+
+  it("requires consent before creating an attribute-only profile", async () => {
+    const { onChanged } = await renderManager(vi.fn(), vi.fn(), null);
+    const height = host.querySelector('input[name="height_cm"]') as HTMLInputElement;
+    const consentInputs = host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    expect(consentInputs).toHaveLength(1);
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(height, "170"); height.dispatchEvent(new Event("input", { bubbles: true })); });
+
+    await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Save attributes")?.click(); });
+
+    expect(saveAttributes).not.toHaveBeenCalled();
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("Agree to browser-local storage and per-run transmission before saving attributes.");
+    expect(host.textContent).toContain("per-run transmission of required photos and optional attributes to 127.0.0.1:8001");
+
+    await act(async () => { consentInputs[0].click(); });
+    await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Save attributes")?.click(); });
+
+    expect(saveAttributes).toHaveBeenCalledWith(expect.objectContaining({ height_cm: 170 }));
+    expect(onChanged).toHaveBeenCalledOnce();
   });
 });
