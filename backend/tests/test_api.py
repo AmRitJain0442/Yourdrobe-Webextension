@@ -12,6 +12,19 @@ class ApiJourneyTest(unittest.TestCase):
             collection.clear()
         self.client = TestClient(app)
 
+    def create_profile(self, session_id: str, roles: tuple[str, ...] = ("upper_body_front",)) -> str:
+        response = self.client.post("/v1/profiles", json={
+            "session_id": session_id,
+            "consent": True,
+            "assets": [
+                {"kind": role, "image_data_url": "data:image/jpeg;base64,ZmFrZQ=="}
+                for role in roles
+            ],
+            "attributes": {"height_cm": 170, "top_size": "M"},
+        })
+        self.assertEqual(response.status_code, 200)
+        return response.json()["profile_id"]
+
     def test_arbitrary_origin_receives_no_cors_allow_origin_header(self) -> None:
         response = self.client.post(
             "/v1/sessions",
@@ -27,7 +40,7 @@ class ApiJourneyTest(unittest.TestCase):
             "/v1/profiles",
             json={
                 "session_id": created[0],
-                "image_data_url": "data:image/jpeg;base64,ZmFrZQ==",
+                "assets": [{"kind": "upper_body_front", "image_data_url": "data:image/jpeg;base64,ZmFrZQ=="}],
                 "consent": True,
             },
         )
@@ -36,15 +49,7 @@ class ApiJourneyTest(unittest.TestCase):
     def test_profile_storage_is_bounded(self) -> None:
         session_id = self.client.post("/v1/sessions", json={}).json()["session_id"]
         for _ in range(101):
-            response = self.client.post(
-                "/v1/profiles",
-                json={
-                    "session_id": session_id,
-                    "image_data_url": "data:image/jpeg;base64,ZmFrZQ==",
-                    "consent": True,
-                },
-            )
-            self.assertEqual(response.status_code, 200)
+            self.create_profile(session_id)
         self.assertEqual(len(profiles), 100)
 
     def test_product_storage_is_bounded(self) -> None:
@@ -66,14 +71,7 @@ class ApiJourneyTest(unittest.TestCase):
 
     def test_job_storage_is_bounded(self) -> None:
         session_id = self.client.post("/v1/sessions", json={}).json()["session_id"]
-        profile_id = self.client.post(
-            "/v1/profiles",
-            json={
-                "session_id": session_id,
-                "image_data_url": "data:image/jpeg;base64,ZmFrZQ==",
-                "consent": True,
-            },
-        ).json()["profile_id"]
+        profile_id = self.create_profile(session_id)
         product_id = self.client.post(
             "/v1/products/normalize",
             json={
@@ -100,14 +98,7 @@ class ApiJourneyTest(unittest.TestCase):
 
     def test_job_completion_survives_product_eviction(self) -> None:
         session_id = self.client.post("/v1/sessions", json={}).json()["session_id"]
-        profile_id = self.client.post(
-            "/v1/profiles",
-            json={
-                "session_id": session_id,
-                "image_data_url": "data:image/jpeg;base64,ZmFrZQ==",
-                "consent": True,
-            },
-        ).json()["profile_id"]
+        profile_id = self.create_profile(session_id)
         first_product = self.client.post(
             "/v1/products/normalize",
             json={
@@ -150,16 +141,7 @@ class ApiJourneyTest(unittest.TestCase):
         self.assertEqual(self.client.get("/health").json(), {"status": "ok"})
 
         session = self.client.post("/v1/sessions", json={}).json()
-        profile_response = self.client.post(
-            "/v1/profiles",
-            json={
-                "session_id": session["session_id"],
-                "image_data_url": "data:image/jpeg;base64,ZmFrZQ==",
-                "consent": True,
-            },
-        )
-        self.assertEqual(profile_response.status_code, 200)
-        profile = profile_response.json()
+        profile = {"profile_id": self.create_profile(session["session_id"])}
 
         normalized = self.client.post(
             "/v1/products/normalize",
@@ -203,11 +185,55 @@ class ApiJourneyTest(unittest.TestCase):
             "/v1/profiles",
             json={
                 "session_id": session["session_id"],
-                "image_data_url": "data:image/jpeg;base64,ZmFrZQ==",
+                "assets": [{"kind": "upper_body_front", "image_data_url": "data:image/jpeg;base64,ZmFrZQ=="}],
                 "consent": False,
             },
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_profile_retains_only_asset_roles(self) -> None:
+        session_id = self.client.post("/v1/sessions", json={}).json()["session_id"]
+        profile_id = self.create_profile(session_id, ("face_front", "right_hand_wrist"))
+        self.assertEqual(profiles[profile_id], {"face_front", "right_hand_wrist"})
+        self.assertNotIn("ZmFrZQ", repr(profiles))
+        self.assertNotIn("height_cm", repr(profiles))
+
+    def test_profile_rejects_duplicate_or_unsupported_roles(self) -> None:
+        session_id = self.client.post("/v1/sessions", json={}).json()["session_id"]
+        duplicate = self.client.post("/v1/profiles", json={
+            "session_id": session_id, "consent": True,
+            "assets": [
+                {"kind": "face_front", "image_data_url": "data:image/jpeg;base64,QQ=="},
+                {"kind": "face_front", "image_data_url": "data:image/jpeg;base64,Qg=="},
+            ],
+            "attributes": {},
+        })
+        unsupported = self.client.post("/v1/profiles", json={
+            "session_id": session_id, "consent": True,
+            "assets": [{"kind": "passport", "image_data_url": "data:image/jpeg;base64,QQ=="}],
+            "attributes": {},
+        })
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(unsupported.status_code, 422)
+
+    def test_tryon_reports_missing_profile_roles(self) -> None:
+        session_id = self.client.post("/v1/sessions", json={}).json()["session_id"]
+        profile_id = self.create_profile(session_id, ("face_front",))
+        product_id = self.client.post("/v1/products/normalize", json={
+            "platform": "amazon_in",
+            "products": [{
+                "platform": "amazon_in", "title": "Linen Dress", "category": "apparel",
+                "product_type": "dress", "image_url": "https://images.example/dress.jpg",
+                "product_url": "https://amazon.in/dp/DRESS",
+            }],
+        }).json()["products"][0]["id"]
+        response = self.client.post("/v1/tryons/batch", json={
+            "session_id": session_id, "profile_id": profile_id, "product_ids": [product_id],
+        })
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"], {
+            "code": "missing_profile_assets", "roles": ["full_body_front"],
+        })
 
     def test_normalize_rejects_unsupported_platform_or_host(self) -> None:
         response = self.client.post(

@@ -1,5 +1,5 @@
 from time import monotonic
-from typing import TypeVar
+from typing import Literal, TypeVar
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -7,9 +7,40 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 
+PhotoRole = Literal[
+    "face_front", "face_left", "face_right", "upper_body_front", "upper_body_side",
+    "full_body_front", "full_body_side", "left_hand_wrist", "right_hand_wrist",
+    "feet_front", "feet_side_top",
+]
+
+
+class ProfileAssetInput(BaseModel):
+    kind: PhotoRole
+    image_data_url: str
+
+
+class ProfileAttributesInput(BaseModel):
+    height_cm: float | None = None
+    top_size: str | None = None
+    bottom_size: str | None = None
+    dress_size: str | None = None
+    chest_cm: float | None = None
+    waist_cm: float | None = None
+    hips_cm: float | None = None
+    inseam_cm: float | None = None
+    skin_tone: str | None = None
+    undertone: str | None = None
+    shoe_size_system: str | None = None
+    shoe_size: str | None = None
+    ring_size: str | None = None
+    left_wrist_cm: float | None = None
+    right_wrist_cm: float | None = None
+
+
 class ProfileInput(BaseModel):
     session_id: str
-    image_data_url: str
+    assets: list[ProfileAssetInput] = Field(min_length=1, max_length=11)
+    attributes: ProfileAttributesInput = Field(default_factory=ProfileAttributesInput)
     consent: bool
 
 
@@ -20,6 +51,10 @@ class ProductInput(BaseModel):
     price: float | None = None
     currency: str | None = None
     category: str = "other"
+    product_type: Literal[
+        "makeup", "eyewear", "headwear", "earrings", "necklace", "top", "outerwear",
+        "dress", "bottom", "belt", "bag", "watch", "bracelet", "ring", "footwear", "unknown",
+    ] = "unknown"
     image_url: str
     product_url: str
     metadata: dict[str, str] = Field(default_factory=dict)
@@ -38,7 +73,7 @@ class BatchInput(BaseModel):
 
 app = FastAPI(title="Yourdrobe Demo API")
 sessions: dict[str, None] = {}
-profiles: dict[str, None] = {}
+profiles: dict[str, set[str]] = {}
 products: dict[str, dict] = {}
 jobs: dict[str, dict] = {}
 StoredValue = TypeVar("StoredValue")
@@ -48,6 +83,23 @@ PLATFORM_HOSTS = {
     "amazon_us": "amazon.com",
     "flipkart": "flipkart.com",
     "nykaa": "nykaa.com",
+}
+PRODUCT_REQUIREMENTS = {
+    "makeup": (("face_front",),),
+    "eyewear": (("face_front",),),
+    "headwear": (("face_front",),),
+    "earrings": (("face_front",),),
+    "necklace": (("upper_body_front",),),
+    "top": (("upper_body_front",),),
+    "outerwear": (("upper_body_front",),),
+    "dress": (("full_body_front",),),
+    "bottom": (("full_body_front",),),
+    "belt": (("full_body_front",),),
+    "bag": (("full_body_front",),),
+    "watch": (("left_hand_wrist", "right_hand_wrist"),),
+    "bracelet": (("left_hand_wrist", "right_hand_wrist"),),
+    "ring": (("left_hand_wrist", "right_hand_wrist"),),
+    "footwear": (("feet_front",),),
 }
 
 
@@ -74,16 +126,19 @@ def create_session() -> dict[str, str]:
 
 
 @app.post("/v1/profiles")
-def create_profile(body: ProfileInput) -> dict[str, str]:
+def create_profile(body: ProfileInput) -> dict[str, object]:
     if body.session_id not in sessions:
         raise HTTPException(404, "Session not found")
     if not body.consent:
         raise HTTPException(400, "Profile consent is required")
-    if not body.image_data_url.startswith("data:image/"):
-        raise HTTPException(400, "A valid image is required")
+    roles = [asset.kind for asset in body.assets]
+    if len(set(roles)) != len(roles):
+        raise HTTPException(400, "Profile asset roles must be unique")
+    if any(not asset.image_data_url.startswith("data:image/") for asset in body.assets):
+        raise HTTPException(400, "Every profile asset must be a valid image")
     profile_id = new_id("profile")
-    remember(profiles, profile_id, None)
-    return {"profile_id": profile_id, "status": "ready"}
+    remember(profiles, profile_id, set(roles))
+    return {"profile_id": profile_id, "status": "ready", "roles": roles}
 
 
 @app.post("/v1/products/normalize")
@@ -111,15 +166,32 @@ def normalize_products(body: NormalizeInput) -> dict[str, list[dict]]:
 def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
     if body.session_id not in sessions or body.profile_id not in profiles:
         raise HTTPException(404, "Session or profile not found")
-    created = []
+    resolved_products = []
     for product_id in body.product_ids:
         if product_id not in products:
             raise HTTPException(404, f"Product not found: {product_id}")
+        resolved_products.append(products[product_id])
+
+    missing = set()
+    profile_roles = profiles[body.profile_id]
+    for product in resolved_products:
+        for alternatives in PRODUCT_REQUIREMENTS.get(product["product_type"], ()):
+            if not any(role in profile_roles for role in alternatives):
+                missing.add(
+                    "hand_wrist"
+                    if set(alternatives) == {"left_hand_wrist", "right_hand_wrist"}
+                    else alternatives[0]
+                )
+    if missing:
+        raise HTTPException(422, {"code": "missing_profile_assets", "roles": sorted(missing)})
+
+    created = []
+    for product_id, product in zip(body.product_ids, resolved_products):
         job_id = new_id("tryon")
         remember(jobs, job_id, {
             "job_id": job_id,
             "product_id": product_id,
-            "result_url": products[product_id]["image_url"],
+            "result_url": product["image_url"],
             "created_at": monotonic(),
         })
         created.append({"job_id": job_id, "product_id": product_id, "status": "queued"})
