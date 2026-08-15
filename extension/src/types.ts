@@ -1,3 +1,8 @@
+export type ProductType =
+  | "makeup" | "eyewear" | "headwear" | "earrings" | "necklace"
+  | "top" | "outerwear" | "dress" | "bottom" | "belt" | "bag"
+  | "watch" | "bracelet" | "ring" | "footwear" | "unknown";
+
 export type Product = {
   id?: string;
   platform: "amazon_in" | "amazon_us" | "flipkart" | "nykaa";
@@ -6,6 +11,7 @@ export type Product = {
   price?: number;
   currency?: "INR" | "USD";
   category: "apparel" | "makeup" | "other";
+  product_type?: ProductType;
   image_url: string;
   product_url: string;
   metadata: { shade?: string; color?: string };
