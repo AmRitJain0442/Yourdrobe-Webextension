@@ -6,12 +6,18 @@ export function amazonAdapter(hostname: string, document: Document): CommerceAda
   return {
     extractProducts: () => valid(
       [...document.querySelectorAll("[data-component-type='s-search-result']")].filter(visible).map((card) => {
-        const href = card.querySelector("h2 a")?.getAttribute("href") || "";
+        const asin = card.getAttribute("data-asin")?.trim() || "";
+        const heading = card.querySelector("h2[aria-label]");
+        const href = /^[a-z0-9]{10}$/i.test(asin)
+          ? `/dp/${asin}`
+          : heading?.closest("a")?.getAttribute("href")
+            || card.querySelector("h2 a")?.getAttribute("href")
+            || "";
         const whole = text(card, [".a-price-whole"]);
         const fraction = text(card, [".a-price-fraction"]);
         return {
           platform: india ? "amazon_in" : "amazon_us",
-          title: text(card, ["h2 span", "h2"]),
+          title: text(card, ["h2[aria-label] span", "h2[aria-label]", "h2 a span", "h2 a", "h2 span", "h2"]),
           price: price(fraction ? `${whole}.${fraction}` : whole),
           currency: india ? "INR" : "USD",
           category: "apparel",

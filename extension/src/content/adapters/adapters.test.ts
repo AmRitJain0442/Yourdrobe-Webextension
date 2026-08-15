@@ -66,4 +66,20 @@ describe("commerce adapters", () => {
       "https://www.amazon.in/dp/4",
     ]);
   });
+
+  it("extracts Amazon's title-recipe card markup", () => {
+    document.body.innerHTML = `
+      <div data-component-type="s-search-result" data-asin="B0ABC12345">
+        <a href="/sponsored-redirect"><h2 aria-label="Sponsored Ad - Linen Dress"><span>Linen Dress</span></h2></a>
+        <img class="s-image" src="https://img/dress.jpg">
+        <span class="a-price-whole">1,199</span>
+      </div>`;
+    const products = selectAdapter("www.amazon.in", document)?.extractProducts() ?? [];
+    expect(products).toHaveLength(1);
+    expect(products[0]).toMatchObject({
+      title: "Linen Dress",
+      product_url: "https://www.amazon.in/dp/B0ABC12345",
+      price: 1199,
+    });
+  });
 });
