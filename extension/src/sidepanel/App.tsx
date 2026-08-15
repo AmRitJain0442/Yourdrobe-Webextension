@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { ExtractProductsResponse, Product, ProductType, TryOnJob } from "../types";
 import { missingRequirements, requirementsForProducts, rolesForRequirement } from "../profile/requirements";
-import { LocalProfileAssetMissingError, loadProfile, loadRequiredAssets } from "../profile/store";
+import { LocalProfileAssetMissingError, loadLegacyImage, loadProfile, loadRequiredAssets } from "../profile/store";
 import type { PhotoRole, ProfileMetadata, RequirementKey } from "../profile/types";
 import { getJob, MissingProfileAssetsError, startDemo, type NormalizedProduct } from "./api";
 import { ProfileSetup } from "./ProfileSetup";
+import { ProfileManager } from "./ProfileManager";
 
-type Phase = "loading" | "profile-setup" | "ready" | "running" | "results" | "empty" | "error";
+type Phase = "loading" | "profile-setup" | "profile-manager" | "ready" | "running" | "results" | "empty" | "error";
 type Result = { product: NormalizedProduct; job: TryOnJob };
 const unsupported = "Open a supported Amazon, Flipkart, or Nykaa listing page and try again.";
 const maxPolls = 5;
@@ -20,6 +21,7 @@ export function App() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [products, setProducts] = useState<Product[]>([]);
   const [profile, setProfile] = useState<ProfileMetadata | null>(null);
+  const [legacyImage, setLegacyImage] = useState<string | null>(null);
   const [missing, setMissing] = useState<RequirementKey[]>([]);
   const [results, setResults] = useState<Result[]>([]);
   const [error, setError] = useState("");
@@ -39,10 +41,12 @@ export function App() {
         }
       }),
       loadProfile(),
-    ]).then(([foundProducts, foundProfile]) => {
+      loadLegacyImage(),
+    ]).then(([foundProducts, foundProfile, foundLegacyImage]) => {
       if (cancelled) return;
       setProducts(foundProducts);
       setProfile(foundProfile);
+      setLegacyImage(foundLegacyImage);
       setPhase(foundProducts.length ? "ready" : "empty");
     }).catch((reason: unknown) => {
       if (cancelled) return;
@@ -54,6 +58,12 @@ export function App() {
       activeRequest.current?.abort();
     };
   }, []);
+
+  async function reloadProfile() {
+    const [nextProfile, nextLegacyImage] = await Promise.all([loadProfile(), loadLegacyImage()]);
+    setProfile(nextProfile);
+    setLegacyImage(nextLegacyImage);
+  }
 
   async function runDemo() {
     const selectedProducts = products.slice(0, 5);
@@ -117,12 +127,14 @@ export function App() {
     <header><span className="eyebrow">Yourdrobe</span><h1>Your fitting room, anywhere.</h1></header>
     {phase === "loading" && <p role="status">Reading products from this page...</p>}
     {phase === "profile-setup" && <ProfileSetup requirements={missing} productTypes={products.map((product) => product.product_type ?? "unknown")} onSaved={() => void loadProfile().then((next) => { setProfile(next); setPhase("ready"); })} onCancel={() => setPhase("ready")} />}
+    {phase === "profile-manager" && <ProfileManager profile={profile} legacyImage={legacyImage} onChanged={() => void reloadProfile()} onClose={() => setPhase(products.length ? "ready" : "empty")} />}
     {phase === "ready" && <section>
       <h2>{products.length} products ready</h2>
       <div className="list">{products.map((product, index) => <div key={product.product_url}><ProductRow product={product} />
         {(!product.product_type || product.product_type === "unknown") && <label>Choose product type for {product.title}<select required value={product.product_type ?? "unknown"} onChange={(event) => setProducts((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, product_type: event.target.value as ProductType } : item))}><option value="unknown">Choose product type</option>{selectableProductTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
       </div>)}</div>
       <button disabled={products.some((product) => !product.product_type || product.product_type === "unknown")} onClick={() => void runDemo()}>Try these products</button>
+      <button className="secondary" onClick={() => setPhase("profile-manager")}>Manage profile</button>
     </section>}
     {phase === "running" && <p role="status">Creating your mock previews...</p>}
     {phase === "empty" && <section><h2>No products found on this page.</h2><p>Browse a product listing or search results on this supported site, then retry.</p><button onClick={() => location.reload()}>Retry</button></section>}
@@ -135,6 +147,7 @@ export function App() {
           : <img src={job.result_url || product.image_url} alt={`Mock preview of ${product.title}`} />}
         <a className="button secondary" href={product.product_url} target="_blank" rel="noreferrer">View original product</a>
       </article>)}</div>
+      <button className="secondary" onClick={() => setPhase("profile-manager")}>Manage profile</button>
     </section>}
     {phase === "error" && <section><p className="error" role="alert">{error}</p><button onClick={() => location.reload()}>Retry</button></section>}
   </main>;

@@ -169,6 +169,12 @@ describe("App", () => {
     expect(host.textContent).toContain("No products found on this page.");
   });
 
+  it("opens profile management from the ready state", async () => {
+    await renderApp();
+    await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Manage profile")?.click(); });
+    expect(host.textContent).toContain("Manage your profile");
+  });
+
   it("shows a timeout error when previews keep processing", async () => {
     vi.useFakeTimers();
     vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);

@@ -64,6 +64,7 @@ describe("profile store", () => {
     expect(await loadLegacyImage()).toContain("data:image/jpeg");
     await assignLegacyImage("upper_body_front");
     expect(chrome.storage.local.remove).toHaveBeenCalledWith("yourdrobe_profile_image");
+    expect(chrome.storage.local.remove).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a legacy image when assignment fails", async () => {
@@ -71,6 +72,16 @@ describe("profile store", () => {
     vi.mocked(createImageBitmap).mockRejectedValueOnce(new Error("invalid image"));
 
     await expect(assignLegacyImage("face_front")).rejects.toThrow("invalid image");
+    expect(chrome.storage.local.remove).not.toHaveBeenCalledWith("yourdrobe_profile_image");
+  });
+
+  it("keeps a legacy image when saving its assigned asset fails", async () => {
+    await chrome.storage.local.set({ yourdrobe_profile_image: "data:image/jpeg;base64,cGhvdG8=" });
+    vi.clearAllMocks();
+    vi.mocked(chrome.storage.local.set).mockRejectedValueOnce(new Error("storage unavailable"));
+
+    await expect(assignLegacyImage("face_front")).rejects.toThrow("storage unavailable");
+    expect(await loadLegacyImage()).toContain("data:image/jpeg");
     expect(chrome.storage.local.remove).not.toHaveBeenCalledWith("yourdrobe_profile_image");
   });
 
