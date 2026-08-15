@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prepareProfileImage } from "./image";
 
 beforeEach(() => {
+  vi.restoreAllMocks();
   vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue({ width: 800, height: 800, close: vi.fn() }));
 });
 
@@ -22,6 +23,16 @@ describe("prepareProfileImage", () => {
     const result = await prepareProfileImage(new File(["x"], "private-name.jpg", { type: "image/jpeg" }), "face_front");
     expect(result.metadata).toMatchObject({ role: "face_front", width: 800, height: 800, mime_type: "image/jpeg" });
     expect(JSON.stringify(result.metadata)).not.toContain("private-name");
+    expect("name" in result.blob).toBe(false);
+  });
+
+  it("rejects an extreme aspect ratio that falls below the minimum after normalization", async () => {
+    vi.mocked(createImageBitmap).mockResolvedValueOnce({ width: 720, height: 10_000, close: vi.fn() } as never);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: vi.fn() } as never);
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback) => callback(new Blob(["small"], { type: "image/jpeg" })));
+
+    await expect(prepareProfileImage(new File(["x"], "tall.jpg", { type: "image/jpeg" }), "face_front"))
+      .rejects.toThrow("at least 720 by 720 pixels");
   });
 
   it("normalizes oversized images through canvas", async () => {
@@ -43,5 +54,15 @@ describe("prepareProfileImage", () => {
 
     await expect(prepareProfileImage(new File(["x".repeat(2 * 1024 * 1024 + 1)], "noisy.jpg", { type: "image/jpeg" }), "face_front"))
       .rejects.toThrow("Choose an image smaller than 2 MB.");
+  });
+
+  it("closes the decoded bitmap when canvas processing fails", async () => {
+    const close = vi.fn();
+    vi.mocked(createImageBitmap).mockResolvedValueOnce({ width: 4096, height: 2048, close } as never);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: () => { throw new Error("canvas failed"); } } as never);
+
+    await expect(prepareProfileImage(new File(["x"], "large.jpg", { type: "image/jpeg" }), "face_front"))
+      .rejects.toThrow("canvas failed");
+    expect(close).toHaveBeenCalledOnce();
   });
 });

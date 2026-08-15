@@ -23,46 +23,45 @@ export async function prepareProfileImage(file: File, role: PhotoRole): Promise<
   if (!accepted.has(file.type)) throw new Error("Use a JPEG, PNG, or WebP image.");
   if (file.size > maxSourceBytes) throw new Error("Choose an image smaller than 10 MB.");
   const bitmap = await createImageBitmap(file);
-  const [minWidth, minHeight] = minimum[role];
-  if (bitmap.width < minWidth || bitmap.height < minHeight) {
+  try {
+    const [minWidth, minHeight] = minimum[role];
+    if (bitmap.width < minWidth || bitmap.height < minHeight) {
+      throw new Error(`Choose an image at least ${minWidth} by ${minHeight} pixels.`);
+    }
+    let blob = file.slice(0, file.size, file.type);
+    let width = bitmap.width;
+    let height = bitmap.height;
+    if (Math.max(width, height) > 2048 || file.size > targetBytes) {
+      const scale = Math.min(1, 2048 / Math.max(width, height));
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+      if (width < minWidth || height < minHeight) {
+        throw new Error(`Choose an image at least ${minWidth} by ${minHeight} pixels.`);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("We could not process that image.");
+      context.drawImage(bitmap, 0, 0, width, height);
+      for (const quality of [0.88, 0.75, 0.62]) {
+        blob = await canvasBlob(canvas, file.type, quality);
+        if (blob.size <= targetBytes) break;
+      }
+      if (blob.size > targetBytes) throw new Error("Choose an image smaller than 2 MB.");
+    }
+    return {
+      blob,
+      metadata: {
+        role,
+        mime_type: blob.type as PreparedProfileImage["metadata"]["mime_type"],
+        width,
+        height,
+        byte_size: blob.size,
+        updated_at: new Date().toISOString(),
+      },
+    };
+  } finally {
     bitmap.close();
-    throw new Error(`Choose an image at least ${minWidth} by ${minHeight} pixels.`);
   }
-  let blob: Blob = file;
-  let width = bitmap.width;
-  let height = bitmap.height;
-  if (Math.max(width, height) > 2048 || file.size > targetBytes) {
-    const scale = Math.min(1, 2048 / Math.max(width, height));
-    width = Math.round(width * scale);
-    height = Math.round(height * scale);
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext("2d");
-    if (!context) {
-      bitmap.close();
-      throw new Error("We could not process that image.");
-    }
-    context.drawImage(bitmap, 0, 0, width, height);
-    for (const quality of [0.88, 0.75, 0.62]) {
-      blob = await canvasBlob(canvas, file.type, quality);
-      if (blob.size <= targetBytes) break;
-    }
-    if (blob.size > targetBytes) {
-      bitmap.close();
-      throw new Error("Choose an image smaller than 2 MB.");
-    }
-  }
-  bitmap.close();
-  return {
-    blob,
-    metadata: {
-      role,
-      mime_type: blob.type as PreparedProfileImage["metadata"]["mime_type"],
-      width,
-      height,
-      byte_size: blob.size,
-      updated_at: new Date().toISOString(),
-    },
-  };
 }

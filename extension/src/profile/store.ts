@@ -5,8 +5,17 @@ const databaseName = "yourdrobe_profile";
 const objectStoreName = "assets";
 const metadataKey = "yourdrobe_profile_v2";
 const legacyKey = "yourdrobe_profile_image";
+const acceptedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 let database: Promise<IDBDatabase> | undefined;
+let profileOperations: Promise<void> = Promise.resolve();
+
+function withProfileLock<T>(operation: () => Promise<T>): Promise<T> {
+  // ponytail: one profile-wide lock; split per role only if local mutation throughput matters.
+  const result = profileOperations.then(operation, operation);
+  profileOperations = result.then(() => undefined, () => undefined);
+  return result;
+}
 
 function openDatabase(): Promise<IDBDatabase> {
   if (database) return database;
@@ -73,7 +82,7 @@ export async function loadProfile(): Promise<ProfileMetadata | null> {
   return (value[metadataKey] as ProfileMetadata | undefined) ?? null;
 }
 
-export async function saveAsset(image: PreparedProfileImage): Promise<ProfileMetadata> {
+async function saveAssetUnlocked(image: PreparedProfileImage): Promise<ProfileMetadata> {
   const profile = await loadProfile() ?? emptyProfile();
   const previousBlob = await transaction<Blob | undefined>("readonly", (store) => store.get(image.metadata.role));
   const next: ProfileMetadata = {
@@ -91,57 +100,85 @@ export async function saveAsset(image: PreparedProfileImage): Promise<ProfileMet
   return next;
 }
 
-export async function loadRequiredAssets(roles: PhotoRole[]): Promise<ProfileAssetUpload[]> {
-  const profile = await loadProfile();
-  if (!profile) return [];
-  const uploads: ProfileAssetUpload[] = [];
-  for (const role of roles) {
-    if (!profile.assets[role]) continue;
-    const blob = await transaction<Blob | undefined>("readonly", (store) => store.get(role));
-    if (!blob) {
-      const assets = { ...profile.assets };
-      delete assets[role];
-      await saveMetadata({ ...profile, assets });
-      throw new LocalProfileAssetMissingError(role);
-    }
-    uploads.push({ kind: role, image_data_url: await dataUrl(blob) });
-  }
-  return uploads;
+export function saveAsset(image: PreparedProfileImage): Promise<ProfileMetadata> {
+  return withProfileLock(() => saveAssetUnlocked(image));
 }
 
-export async function deleteAsset(role: PhotoRole): Promise<ProfileMetadata | null> {
-  const profile = await loadProfile();
-  const previousBlob = await transaction<Blob | undefined>("readonly", (store) => store.get(role));
+async function removeCorruptAsset(profile: ProfileMetadata, role: PhotoRole, previousBlob?: Blob): Promise<never> {
   await transaction("readwrite", (store) => store.delete(role));
-  if (!profile) return null;
   const assets = { ...profile.assets };
   delete assets[role];
-  const next = { ...profile, assets };
   try {
-    await saveMetadata(next);
+    await saveMetadata({ ...profile, assets });
   } catch (error) {
     if (previousBlob) await transaction("readwrite", (store) => store.put(previousBlob, role));
     throw error;
   }
-  return next;
+  throw new LocalProfileAssetMissingError(role);
 }
 
-export async function saveAttributes(attributes: ProfileAttributes): Promise<ProfileMetadata> {
-  const profile = await loadProfile() ?? emptyProfile();
-  const nextAttributes = { ...profile.attributes };
-  for (const [key, value] of Object.entries(attributes) as [keyof ProfileAttributes, ProfileAttributes[keyof ProfileAttributes]][]) {
-    if (value === undefined) delete nextAttributes[key];
-    else (nextAttributes as Record<string, unknown>)[key] = value;
-  }
-  const next = { ...profile, attributes: nextAttributes };
-  await saveMetadata(next);
-  return next;
+export function loadRequiredAssets(roles: PhotoRole[]): Promise<ProfileAssetUpload[]> {
+  return withProfileLock(async () => {
+    const profile = await loadProfile();
+    if (!profile) return [];
+    const uploads: ProfileAssetUpload[] = [];
+    for (const role of roles) {
+      if (!profile.assets[role]) continue;
+      const blob = await transaction<Blob | undefined>("readonly", (store) => store.get(role));
+      if (!blob) return removeCorruptAsset(profile, role);
+      if (!blob.size || !acceptedImageTypes.has(blob.type)) return removeCorruptAsset(profile, role, blob);
+      let bitmap: ImageBitmap | undefined;
+      try {
+        bitmap = await createImageBitmap(blob);
+        uploads.push({ kind: role, image_data_url: await dataUrl(blob) });
+      } catch {
+        await removeCorruptAsset(profile, role, blob);
+      } finally {
+        bitmap?.close();
+      }
+    }
+    return uploads;
+  });
 }
 
-export async function deleteProfile(): Promise<void> {
-  await transaction("readwrite", (store) => store.clear());
-  await chrome.storage.local.remove(metadataKey);
-  await chrome.storage.local.remove(legacyKey);
+export function deleteAsset(role: PhotoRole): Promise<ProfileMetadata | null> {
+  return withProfileLock(async () => {
+    const profile = await loadProfile();
+    const previousBlob = await transaction<Blob | undefined>("readonly", (store) => store.get(role));
+    await transaction("readwrite", (store) => store.delete(role));
+    if (!profile) return null;
+    const assets = { ...profile.assets };
+    delete assets[role];
+    const next = { ...profile, assets };
+    try {
+      await saveMetadata(next);
+    } catch (error) {
+      if (previousBlob) await transaction("readwrite", (store) => store.put(previousBlob, role));
+      throw error;
+    }
+    return next;
+  });
+}
+
+export function saveAttributes(attributes: ProfileAttributes): Promise<ProfileMetadata> {
+  return withProfileLock(async () => {
+    const profile = await loadProfile() ?? emptyProfile();
+    const nextAttributes = { ...profile.attributes };
+    for (const [key, value] of Object.entries(attributes) as [keyof ProfileAttributes, ProfileAttributes[keyof ProfileAttributes]][]) {
+      if (value === undefined) delete nextAttributes[key];
+      else (nextAttributes as Record<string, unknown>)[key] = value;
+    }
+    const next = { ...profile, attributes: nextAttributes };
+    await saveMetadata(next);
+    return next;
+  });
+}
+
+export function deleteProfile(): Promise<void> {
+  return withProfileLock(async () => {
+    await transaction("readwrite", (store) => store.clear());
+    await chrome.storage.local.remove([metadataKey, legacyKey]);
+  });
 }
 
 export async function loadLegacyImage(): Promise<string | null> {
@@ -149,16 +186,20 @@ export async function loadLegacyImage(): Promise<string | null> {
   return typeof value[legacyKey] === "string" ? value[legacyKey] : null;
 }
 
-export async function assignLegacyImage(role: PhotoRole): Promise<ProfileMetadata> {
-  const image = await loadLegacyImage();
-  if (!image) throw new Error("No legacy image is available.");
-  const blob = dataUrlBlob(image);
-  const prepared = await prepareProfileImage(new File([blob], "legacy-image", { type: blob.type }), role);
-  const profile = await saveAsset(prepared);
-  await chrome.storage.local.remove(legacyKey);
-  return profile;
+export function assignLegacyImage(role: PhotoRole): Promise<ProfileMetadata> {
+  return withProfileLock(async () => {
+    const image = await loadLegacyImage();
+    if (!image) throw new Error("No legacy image is available.");
+    const blob = dataUrlBlob(image);
+    const prepared = await prepareProfileImage(new File([blob], "legacy-image", { type: blob.type }), role);
+    const profile = await saveAssetUnlocked(prepared);
+    await chrome.storage.local.remove(legacyKey);
+    return profile;
+  });
 }
 
-export async function deleteLegacyImage(): Promise<void> {
-  await chrome.storage.local.remove(legacyKey);
+export function deleteLegacyImage(): Promise<void> {
+  return withProfileLock(async () => {
+    await chrome.storage.local.remove(legacyKey);
+  });
 }
