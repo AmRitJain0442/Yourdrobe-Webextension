@@ -16,4 +16,12 @@ describe("classifyProductType", () => {
   it("does not guess an unrelated product type", () => {
     expect(classifyProductType("Daily essential", "other")).toBe("unknown");
   });
+
+  it.each([
+    ["Spring dress", "apparel", "dress"],
+    ["Laptop backpack", "other", "bag"],
+    ["Cap sleeve dress", "apparel", "unknown"],
+  ] as const)("classifies %s conservatively", (title, category, expected) => {
+    expect(classifyProductType(title, category)).toBe(expected);
+  });
 });
