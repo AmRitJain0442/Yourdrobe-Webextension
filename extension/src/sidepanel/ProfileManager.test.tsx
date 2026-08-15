@@ -80,7 +80,9 @@ describe("ProfileManager", () => {
     await renderManager();
     const height = [...host.querySelectorAll("input")].find((input) => input.getAttribute("name") === "height_cm") as HTMLInputElement;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(height, "170"); height.dispatchEvent(new Event("input", { bubbles: true })); });
-    await act(async () => { host.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    expect(height.validity.valid).toBe(true);
+    expect((host.querySelector("form") as HTMLFormElement).checkValidity()).toBe(true);
+    await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Save attributes")?.click(); });
     expect(saveAttributes).toHaveBeenCalledWith(expect.objectContaining({ height_cm: 170 }));
   });
 });

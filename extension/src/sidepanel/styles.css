@@ -11,6 +11,8 @@
   --accent-active: #6f213b;
   --accent-soft: #f7e7ed;
   --danger: #a6283e;
+  --danger-hover: #821d31;
+  --danger-text: #fff;
   --radius: 10px;
 }
 
@@ -56,9 +58,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .profile-asset img { width: 100%; max-height: 180px; object-fit: contain; border-radius: var(--radius); background: var(--surface-muted); }
 fieldset { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); padding: 0 12px; }
 legend { padding: 0 4px; font-weight: 800; }
-.danger { margin-top: 16px; background: var(--danger); }
+.danger { margin-top: 16px; background: var(--danger); color: var(--danger-text); }
+.danger:hover { background: var(--danger-hover); color: var(--danger-text); }
 @media (prefers-color-scheme: dark) {
-  :root { color: #f6edef; background: #1f1719; --surface: #2a2022; --surface-muted: #1f1719; --text: #f6edef; --text-muted: #d9c8cb; --border: #4f3e42; --accent: #ec8aa9; --accent-active: #ffc0d0; --accent-soft: #492d35; --danger: #ff9eb3; }
+  :root { color: #f6edef; background: #1f1719; --surface: #2a2022; --surface-muted: #1f1719; --text: #f6edef; --text-muted: #d9c8cb; --border: #4f3e42; --accent: #ec8aa9; --accent-active: #ffc0d0; --accent-soft: #492d35; --danger: #b72a4c; --danger-hover: #8e1d39; --danger-text: #fff; }
   body { background: var(--surface-muted); }
   .secondary { color: #ffd5e0; }
 }
