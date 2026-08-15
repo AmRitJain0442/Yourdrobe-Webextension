@@ -1,7 +1,14 @@
 import type { Product, TryOnJob } from "../types";
+import type { ProfileAssetUpload, ProfileAttributes, RequirementKey } from "../profile/types";
 
 const baseUrl = "http://127.0.0.1:8001/v1";
 export type NormalizedProduct = Product & { id: string };
+
+export class MissingProfileAssetsError extends Error {
+  constructor(readonly roles: RequirementKey[]) {
+    super("Additional profile photos are required.");
+  }
+}
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const signal = init?.signal
@@ -30,16 +37,26 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
       ? "The local backend returned an unexpected response. Restart it and try again."
       : "The local backend could not process the request. Please try again.");
   }
-  if (!response.ok) throw new Error("The local backend could not process the request. Please try again.");
+  if (!response.ok) {
+    const detail = (body as { detail?: unknown }).detail;
+    if (response.status === 422
+      && typeof detail === "object" && detail !== null
+      && (detail as { code?: unknown }).code === "missing_profile_assets"
+      && Array.isArray((detail as { roles?: unknown }).roles)
+      && (detail as { roles: unknown[] }).roles.every((role) => typeof role === "string")) {
+      throw new MissingProfileAssetsError((detail as { roles: RequirementKey[] }).roles);
+    }
+    throw new Error("The local backend could not process the request. Please try again.");
+  }
   return body;
 }
 
-export async function startDemo(imageDataUrl: string, products: Product[], signal?: AbortSignal) {
+export async function startDemo(assets: ProfileAssetUpload[], attributes: ProfileAttributes, products: Product[], signal?: AbortSignal) {
   const session = await json<{ session_id: string }>("/sessions", { method: "POST", body: "{}", signal });
   const profile = await json<{ profile_id: string }>("/profiles", {
     method: "POST",
     signal,
-    body: JSON.stringify({ session_id: session.session_id, image_data_url: imageDataUrl, consent: true }),
+    body: JSON.stringify({ session_id: session.session_id, assets, attributes, consent: true }),
   });
   const normalized = await json<{ products: NormalizedProduct[] }>("/products/normalize", {
     method: "POST",

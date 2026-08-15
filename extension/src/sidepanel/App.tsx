@@ -1,29 +1,26 @@
 import { useEffect, useRef, useState } from "react";
-import type { ExtractProductsResponse, Product, TryOnJob } from "../types";
-import { getJob, startDemo, type NormalizedProduct } from "./api";
+import type { ExtractProductsResponse, Product, ProductType, TryOnJob } from "../types";
+import { missingRequirements, requirementsForProducts, rolesForRequirement } from "../profile/requirements";
+import { LocalProfileAssetMissingError, loadProfile, loadRequiredAssets } from "../profile/store";
+import type { PhotoRole, ProfileMetadata, RequirementKey } from "../profile/types";
+import { getJob, MissingProfileAssetsError, startDemo, type NormalizedProduct } from "./api";
+import { ProfileSetup } from "./ProfileSetup";
 
-type Phase = "loading" | "needs-profile" | "ready" | "running" | "results" | "empty" | "error";
+type Phase = "loading" | "profile-setup" | "ready" | "running" | "results" | "empty" | "error";
 type Result = { product: NormalizedProduct; job: TryOnJob };
-const profileKey = "yourdrobe_profile_image";
 const unsupported = "Open a supported Amazon, Flipkart, or Nykaa listing page and try again.";
 const maxPolls = 5;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function readFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error("We could not read that image."));
-    reader.readAsDataURL(file);
-  });
-}
+const selectableProductTypes: ProductType[] = [
+  "makeup", "eyewear", "headwear", "earrings", "necklace", "top", "outerwear",
+  "dress", "bottom", "belt", "bag", "watch", "bracelet", "ring", "footwear",
+];
 
 export function App() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [products, setProducts] = useState<Product[]>([]);
-  const [profileImage, setProfileImage] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [consent, setConsent] = useState(false);
+  const [profile, setProfile] = useState<ProfileMetadata | null>(null);
+  const [missing, setMissing] = useState<RequirementKey[]>([]);
   const [results, setResults] = useState<Result[]>([]);
   const [error, setError] = useState("");
   const activeRequest = useRef<AbortController | null>(null);
@@ -41,13 +38,12 @@ export function App() {
           throw new Error(unsupported);
         }
       }),
-      chrome.storage.local.get(profileKey),
-    ]).then(([foundProducts, stored]) => {
+      loadProfile(),
+    ]).then(([foundProducts, foundProfile]) => {
       if (cancelled) return;
-      const image = typeof stored[profileKey] === "string" ? stored[profileKey] : "";
       setProducts(foundProducts);
-      setProfileImage(image);
-      setPhase(foundProducts.length ? (image ? "ready" : "needs-profile") : "empty");
+      setProfile(foundProfile);
+      setPhase(foundProducts.length ? "ready" : "empty");
     }).catch((reason: unknown) => {
       if (cancelled) return;
       setError(reason instanceof Error ? reason.message : unsupported);
@@ -59,30 +55,26 @@ export function App() {
     };
   }, []);
 
-  async function saveProfile() {
-    if (!file || !consent) {
-      setError("Choose an image and agree to local demo storage.");
+  async function runDemo() {
+    const selectedProducts = products.slice(0, 5);
+    const required = missingRequirements(selectedProducts, Object.keys(profile?.assets ?? {}) as PhotoRole[]);
+    if (required.length) {
+      setMissing(required);
+      setPhase("profile-setup");
       return;
     }
-    try {
-      const image = await readFile(file);
-      await chrome.storage.local.set({ [profileKey]: image });
-      setProfileImage(image);
-      setError("");
-      setPhase("ready");
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "We could not save that image.");
-    }
-  }
-
-  async function runDemo() {
     activeRequest.current?.abort();
     const request = new AbortController();
     activeRequest.current = request;
     setPhase("running");
     setError("");
     try {
-      const started = await startDemo(profileImage, products.slice(0, 5), request.signal);
+      const available = new Set(Object.keys(profile?.assets ?? {}) as PhotoRole[]);
+      const roles = requirementsForProducts(selectedProducts).map((requirement) =>
+        rolesForRequirement(requirement).find((role) => available.has(role)) ?? rolesForRequirement(requirement)[0],
+      );
+      const assets = await loadRequiredAssets(roles);
+      const started = await startDemo(assets, profile?.attributes ?? {}, selectedProducts, request.signal);
       if (request.signal.aborted) return;
       let current = started.jobs;
       for (let polls = 0; current.some((job) => job.status === "queued" || job.status === "processing") && polls < maxPolls; polls += 1) {
@@ -102,6 +94,18 @@ export function App() {
       setPhase("results");
     } catch (reason) {
       if (request.signal.aborted) return;
+      if (reason instanceof MissingProfileAssetsError) {
+        setMissing(reason.roles);
+        setPhase("profile-setup");
+        return;
+      }
+      if (reason instanceof LocalProfileAssetMissingError) {
+        const repaired = await loadProfile();
+        setProfile(repaired);
+        setMissing(missingRequirements(selectedProducts, Object.keys(repaired?.assets ?? {}) as PhotoRole[]));
+        setPhase("profile-setup");
+        return;
+      }
       setError(reason instanceof Error ? reason.message : "The local backend is unavailable.");
       setPhase("error");
     } finally {
@@ -112,18 +116,13 @@ export function App() {
   return <main>
     <header><span className="eyebrow">Yourdrobe</span><h1>Your fitting room, anywhere.</h1></header>
     {phase === "loading" && <p role="status">Reading products from this page...</p>}
-    {phase === "needs-profile" && <section>
-      <h2>Create your local demo profile</h2>
-      <p>Your image is stored in Chrome and sent only to the local demo backend for processing.</p>
-      <label>Profile image<input type="file" accept="image/*" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
-      <label className="check"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} />I agree to store this image locally for the demo.</label>
-      {error && <p className="error" role="alert">{error}</p>}
-      <button onClick={() => void saveProfile()}>Save profile</button>
-    </section>}
+    {phase === "profile-setup" && <ProfileSetup requirements={missing} productTypes={products.map((product) => product.product_type ?? "unknown")} onSaved={() => void loadProfile().then((next) => { setProfile(next); setPhase("ready"); })} onCancel={() => setPhase("ready")} />}
     {phase === "ready" && <section>
       <h2>{products.length} products ready</h2>
-      <div className="list">{products.map((product) => <ProductRow key={product.product_url} product={product} />)}</div>
-      <button onClick={() => void runDemo()}>Try these products</button>
+      <div className="list">{products.map((product, index) => <div key={product.product_url}><ProductRow product={product} />
+        {(!product.product_type || product.product_type === "unknown") && <label>Choose product type for {product.title}<select required value={product.product_type ?? "unknown"} onChange={(event) => setProducts((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, product_type: event.target.value as ProductType } : item))}><option value="unknown">Choose product type</option>{selectableProductTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
+      </div>)}</div>
+      <button disabled={products.some((product) => !product.product_type || product.product_type === "unknown")} onClick={() => void runDemo()}>Try these products</button>
     </section>}
     {phase === "running" && <p role="status">Creating your mock previews...</p>}
     {phase === "empty" && <section><h2>No products found on this page.</h2><p>Browse a product listing or search results on this supported site, then retry.</p><button onClick={() => location.reload()}>Retry</button></section>}
