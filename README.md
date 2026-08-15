@@ -28,7 +28,18 @@ npm.cmd --prefix extension run build
 6. Click the extension action and complete local profile consent.
 7. Confirm all generated imagery is labeled `Mock AI preview` and every product link opens its source listing.
 
-The backend uses bounded memory and resets on restart. The selected profile image is persisted only in Chrome local extension storage, sent to the local backend for each run, and not retained in backend memory. The service-account key is ignored and unused. This slice has no live AI or 3D feature.
+## Progressive profile behavior and privacy
+
+- Clicking **Try these products** requests only the missing category-specific photos.
+- Users upload files during this phase; guided camera capture is deferred.
+- Photos are stored as IndexedDB blobs in Chrome, while profile metadata is stored in `chrome.storage.local`.
+- Only the required images are sent to the local backend on port `8001`; the backend does not retain them.
+- **Manage profile** replaces or deletes individual photos and can delete the complete profile.
+- Existing single-photo profiles must be assigned a role once. Attributes are optional and stored locally.
+- Product previews remain mocks that reuse product imagery and are labeled `Mock AI preview`.
+- YouCam, cloud profiles, and 3D are not present in this slice.
+
+The service-account key is ignored and unused.
 
 ## Automated verification
 
@@ -39,11 +50,11 @@ $env:PYTHONPATH='backend'
 backend/.venv/Scripts/python.exe -m unittest backend.tests.test_api -v
 npm.cmd --prefix extension test
 npm.cmd --prefix extension run build
-git check-ignore -v my-product-sa-key.json
 git diff --check
+git status --short --branch
 ```
 
-Expected results: the backend tests pass, the extension tests pass, the extension build succeeds, `my-product-sa-key.json` is ignored, and `git diff --check` prints nothing. The current suites contain 11 backend tests and 15 extension tests.
+Expected results: the backend tests pass, the extension tests pass, the extension build succeeds, `git diff --check` prints nothing, and only the intended README change is uncommitted.
 
 Inspect the generated artifacts and repository status:
 
