@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Yourdrobe AI Try-On Demo",
+  "version": "0.1.0",
+  "description": "Extract products and preview the local Yourdrobe demo flow.",
+  "permissions": ["sidePanel", "storage"],
+  "host_permissions": [
+    "https://*.amazon.in/*",
+    "https://*.amazon.com/*",
+    "https://*.flipkart.com/*",
+    "https://*.nykaa.com/*",
+    "http://127.0.0.1:8000/*"
+  ],
+  "background": { "service_worker": "assets/background.js", "type": "module" },
+  "action": { "default_title": "Open Yourdrobe" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "content_scripts": [{
+    "matches": [
+      "https://*.amazon.in/*",
+      "https://*.amazon.com/*",
+      "https://*.flipkart.com/*",
+      "https://*.nykaa.com/*"
+    ],
+    "js": ["assets/content.js"],
+    "run_at": "document_idle"
+  }]
+}
