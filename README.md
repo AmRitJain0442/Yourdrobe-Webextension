@@ -8,7 +8,7 @@ From the repository root, create the backend environment and start the local API
 python -m venv backend/.venv
 backend/.venv/Scripts/python.exe -m pip install -r backend/requirements.txt
 $env:PYTHONPATH='backend'
-backend/.venv/Scripts/python.exe -m uvicorn app.main:app --reload
+backend/.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8001
 ```
 
 In a second terminal, install the extension dependencies and build the unpacked extension:

@@ -1,6 +1,6 @@
 import type { Product, TryOnJob } from "../types";
 
-const baseUrl = "http://127.0.0.1:8000/v1";
+const baseUrl = "http://127.0.0.1:8001/v1";
 export type NormalizedProduct = Product & { id: string };
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
