@@ -70,6 +70,26 @@ describe("ProfileSetup", () => {
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
+  it("waits for each asset save before starting the next metadata write", async () => {
+    let releaseFirstSave = () => {};
+    vi.mocked(saveAsset).mockImplementationOnce(() => new Promise((resolve) => { releaseFirstSave = () => resolve({} as never); })).mockResolvedValue({} as never);
+    await act(async () => {
+      root.render(<ProfileSetup requirements={["face_front", "hand_wrist"]} productTypes={[]} onSaved={onSaved} onCancel={vi.fn()} />);
+    });
+    const [face, hand] = Array.from(host.querySelectorAll('input[type="file"]')) as HTMLInputElement[];
+    await act(async () => {
+      choose(face, new File(["face"], "face.jpg", { type: "image/jpeg" }));
+      choose(hand, new File(["hand"], "hand.jpg", { type: "image/jpeg" }));
+      (host.querySelector('input[type="checkbox"]') as HTMLInputElement).click();
+    });
+    const button = Array.from(host.querySelectorAll("button")).find((item) => item.textContent === "Save profile photos") as HTMLButtonElement;
+    await act(async () => { button.click(); await Promise.resolve(); });
+    expect(saveAsset).toHaveBeenCalledTimes(1);
+    await act(async () => { releaseFirstSave(); await Promise.resolve(); });
+    expect(saveAsset).toHaveBeenCalledTimes(2);
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
   it("does not write any assets when one selected photo is invalid", async () => {
     vi.mocked(prepareProfileImage).mockImplementation(async (_file, role) => {
       if (role === "right_hand_wrist") throw new Error("Choose a clearer hand photo.");

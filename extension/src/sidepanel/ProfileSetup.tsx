@@ -68,7 +68,7 @@ export function ProfileSetup({ requirements, productTypes, onSaved, onCancel }: 
     });
     if (Object.keys(invalid).length) { setErrors(invalid); return; }
     try {
-      await Promise.all(prepared.map((result) => saveAsset((result as PromiseFulfilledResult<PreparedProfileImage>).value)));
+      for (const result of prepared) await saveAsset((result as PromiseFulfilledResult<PreparedProfileImage>).value);
       await saveAttributes(selectedAttributes());
       onSaved();
     } catch (reason) {
