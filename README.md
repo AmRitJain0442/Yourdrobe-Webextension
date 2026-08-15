@@ -33,7 +33,7 @@ npm.cmd --prefix extension run build
 - Clicking **Try these products** requests only the missing category-specific photos.
 - Users upload files during this phase; guided camera capture is deferred.
 - Photos are stored as IndexedDB blobs in Chrome, while profile metadata is stored in `chrome.storage.local`.
-- Only the required images are sent to the local backend on port `8001`; the backend does not retain them.
+- For each try-on/product run, only the required images are sent to the local backend on port `8001`; the backend does not retain them.
 - **Manage profile** replaces or deletes individual photos and can delete the complete profile.
 - Existing single-photo profiles must be assigned a role once. Attributes are optional and stored locally.
 - Product previews remain mocks that reuse product imagery and are labeled `Mock AI preview`.
