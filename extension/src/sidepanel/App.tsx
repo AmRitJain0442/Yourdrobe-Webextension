@@ -127,7 +127,7 @@ export function App() {
     <header><span className="eyebrow">Yourdrobe</span><h1>Your fitting room, anywhere.</h1></header>
     {phase === "loading" && <p role="status">Reading products from this page...</p>}
     {phase === "profile-setup" && <ProfileSetup requirements={missing} productTypes={products.map((product) => product.product_type ?? "unknown")} onSaved={() => void loadProfile().then((next) => { setProfile(next); setPhase("ready"); })} onCancel={() => setPhase("ready")} />}
-    {phase === "profile-manager" && <ProfileManager profile={profile} legacyImage={legacyImage} onChanged={() => void reloadProfile()} onClose={() => setPhase(products.length ? "ready" : "empty")} />}
+    {phase === "profile-manager" && <ProfileManager profile={profile} legacyImage={legacyImage} onChanged={reloadProfile} onClose={() => setPhase(products.length ? "ready" : "empty")} />}
     {phase === "ready" && <section>
       <h2>{products.length} products ready</h2>
       <div className="list">{products.map((product, index) => <div key={product.product_url}><ProductRow product={product} />

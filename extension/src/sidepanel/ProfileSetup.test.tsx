@@ -59,7 +59,9 @@ describe("ProfileSetup", () => {
     await act(async () => { button.click(); });
     expect(saveAsset).not.toHaveBeenCalled();
     expect(saveAttributes).not.toHaveBeenCalled();
-    expect(host.querySelector('[role="alert"]')?.textContent).toBe("Agree to local profile storage before saving.");
+    expect(host.textContent).toContain("browser-local profile storage and per-run transmission");
+    expect(host.textContent).toContain("127.0.0.1:8001");
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("Agree to browser-local storage and per-run transmission before saving.");
 
     const consent = host.querySelector('input[type="checkbox"]') as HTMLInputElement;
     await act(async () => { consent.click(); });
@@ -113,5 +115,82 @@ describe("ProfileSetup", () => {
     expect(saveAsset).not.toHaveBeenCalled();
     expect(saveAttributes).not.toHaveBeenCalled();
     expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("places upload guidance before the input and associates guidance and errors", async () => {
+    await act(async () => {
+      root.render(<ProfileSetup requirements={["face_front"]} productTypes={[]} onSaved={onSaved} onCancel={vi.fn()} />);
+    });
+    const input = host.querySelector('input[type="file"]') as HTMLInputElement;
+    const guidance = host.querySelector(".profile-guidance") as HTMLParagraphElement;
+    expect(host.querySelector(`label[for="${input.id}"]`)).not.toBeNull();
+    expect(guidance.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(input.getAttribute("aria-describedby")).toBe(guidance.id);
+
+    await act(async () => {
+      (host.querySelector('input[type="checkbox"]') as HTMLInputElement).click();
+      (host.querySelector('button[type="submit"]') as HTMLButtonElement).click();
+    });
+
+    const roleError = host.querySelector('.profile-field [role="alert"]') as HTMLParagraphElement;
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(input.getAttribute("aria-describedby")?.split(" ")).toContain(roleError.id);
+  });
+
+  it("cancels during preparation before writing any profile data", async () => {
+    let releasePreparation!: (value: Awaited<ReturnType<typeof prepareProfileImage>>) => void;
+    vi.mocked(prepareProfileImage).mockImplementationOnce(() => new Promise((resolve) => { releasePreparation = resolve; }));
+    const onCancel = vi.fn();
+    await act(async () => {
+      root.render(<ProfileSetup requirements={["face_front"]} productTypes={[]} onSaved={onSaved} onCancel={onCancel} />);
+    });
+    const input = host.querySelector('input[type="file"]') as HTMLInputElement;
+    await act(async () => {
+      choose(input, new File(["face"], "face.jpg", { type: "image/jpeg" }));
+      (host.querySelector('input[type="checkbox"]') as HTMLInputElement).click();
+      (host.querySelector('button[type="submit"]') as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      [...host.querySelectorAll("button")].find((button) => button.textContent === "Cancel")?.click();
+    });
+    await act(async () => {
+      releasePreparation({ blob: new Blob(["face"], { type: "image/jpeg" }), metadata: { role: "face_front", mime_type: "image/jpeg", width: 720, height: 720, byte_size: 4, updated_at: "2026-08-15T00:00:00.000Z" } });
+      await Promise.resolve();
+    });
+
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(saveAsset).not.toHaveBeenCalled();
+    expect(saveAttributes).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("runs only one save while disabling controls", async () => {
+    let releasePreparation!: (value: Awaited<ReturnType<typeof prepareProfileImage>>) => void;
+    vi.mocked(prepareProfileImage).mockImplementationOnce(() => new Promise((resolve) => { releasePreparation = resolve; }));
+    await act(async () => {
+      root.render(<ProfileSetup requirements={["face_front"]} productTypes={[]} onSaved={onSaved} onCancel={vi.fn()} />);
+    });
+    const input = host.querySelector('input[type="file"]') as HTMLInputElement;
+    const consent = host.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const saveButton = host.querySelector('button[type="submit"]') as HTMLButtonElement;
+    await act(async () => {
+      choose(input, new File(["face"], "face.jpg", { type: "image/jpeg" }));
+      consent.click();
+      saveButton.click();
+      saveButton.click();
+      await Promise.resolve();
+    });
+    const controlsWereDisabled = input.matches(":disabled") && consent.matches(":disabled") && saveButton.matches(":disabled");
+    await act(async () => {
+      releasePreparation({ blob: new Blob(["face"], { type: "image/jpeg" }), metadata: { role: "face_front", mime_type: "image/jpeg", width: 720, height: 720, byte_size: 4, updated_at: "2026-08-15T00:00:00.000Z" } });
+      await new Promise((resolve) => setTimeout(resolve));
+    });
+
+    expect(controlsWereDisabled).toBe(true);
+    expect(prepareProfileImage).toHaveBeenCalledOnce();
+    expect(saveAsset).toHaveBeenCalledOnce();
+    expect(saveAttributes).toHaveBeenCalledOnce();
+    expect(onSaved).toHaveBeenCalledOnce();
   });
 });

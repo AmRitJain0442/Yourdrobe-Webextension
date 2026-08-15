@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LocalProfileAssetMissingError, loadProfile, loadRequiredAssets } from "../profile/store";
+import { deleteProfile, LocalProfileAssetMissingError, loadProfile, loadRequiredAssets } from "../profile/store";
 import type { ProfileMetadata } from "../profile/types";
 import { App } from "./App";
 
@@ -9,6 +9,7 @@ vi.mock("../profile/store", () => ({
   loadProfile: vi.fn(),
   loadRequiredAssets: vi.fn(),
   loadLegacyImage: vi.fn().mockResolvedValue(null),
+  deleteProfile: vi.fn(),
   LocalProfileAssetMissingError: class extends Error {},
 }));
 
@@ -50,6 +51,7 @@ beforeEach(() => {
   } as unknown as typeof chrome;
   vi.mocked(loadProfile).mockResolvedValue(null);
   vi.mocked(loadRequiredAssets).mockResolvedValue([]);
+  vi.mocked(deleteProfile).mockResolvedValue();
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -173,6 +175,32 @@ describe("App", () => {
     await renderApp();
     await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Manage profile")?.click(); });
     expect(host.textContent).toContain("Manage your profile");
+  });
+
+  it("keeps profile deletion busy until App reloads the cleared profile", async () => {
+    let finishReload!: (value: ProfileMetadata | null) => void;
+    const reloaded = new Promise<ProfileMetadata | null>((resolve) => { finishReload = resolve; });
+    vi.mocked(loadProfile).mockResolvedValueOnce({ ...fullBodyProfile, attributes: { height_cm: 170 } }).mockReturnValueOnce(reloaded);
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+    await renderApp();
+    await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Manage profile")?.click(); });
+
+    await act(async () => {
+      [...host.querySelectorAll("button")].find((button) => button.textContent === "Delete complete profile")?.click();
+      await Promise.resolve();
+    });
+
+    expect(deleteProfile).toHaveBeenCalledOnce();
+    expect(host.textContent).toContain("Manage your profile");
+    expect(([...host.querySelectorAll("button")].find((button) => button.textContent === "Close") as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      finishReload(null);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(host.textContent).not.toContain("Manage your profile");
+    expect(host.textContent).toContain("products ready");
   });
 
   it("shows a timeout error when previews keep processing", async () => {
