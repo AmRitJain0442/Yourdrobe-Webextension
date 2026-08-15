@@ -48,6 +48,10 @@ export async function prepareProfileImage(file: File, role: PhotoRole): Promise<
       blob = await canvasBlob(canvas, file.type, quality);
       if (blob.size <= targetBytes) break;
     }
+    if (blob.size > targetBytes) {
+      bitmap.close();
+      throw new Error("Choose an image smaller than 2 MB.");
+    }
   }
   bitmap.close();
   return {

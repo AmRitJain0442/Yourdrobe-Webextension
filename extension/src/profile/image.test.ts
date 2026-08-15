@@ -35,4 +35,13 @@ describe("prepareProfileImage", () => {
     expect(Math.max(result.metadata.width, result.metadata.height)).toBeLessThanOrEqual(2048);
     expect(result.blob).not.toBe(source);
   });
+
+  it("rejects an image that cannot be compressed below 2 MiB", async () => {
+    vi.mocked(createImageBitmap).mockResolvedValueOnce({ width: 2048, height: 2048, close: vi.fn() } as never);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: vi.fn() } as never);
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback) => callback(new Blob(["x".repeat(2 * 1024 * 1024 + 1)], { type: "image/jpeg" })));
+
+    await expect(prepareProfileImage(new File(["x".repeat(2 * 1024 * 1024 + 1)], "noisy.jpg", { type: "image/jpeg" }), "face_front"))
+      .rejects.toThrow("Choose an image smaller than 2 MB.");
+  });
 });
