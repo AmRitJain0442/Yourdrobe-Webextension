@@ -92,6 +92,7 @@ export function App() {
   }
 
   async function runDemo(currentProfile = profile) {
+    if (outfitMutation.current) return;
     const selectedProducts = products.slice(0, 5);
     const outfitBaseImageDataUrl = activeOutfit && selectedProducts.some((product) => activeOutfitProductTypes.has(product.product_type ?? "unknown"))
       ? activeOutfit.image_data_url
@@ -267,7 +268,7 @@ export function App() {
       <div className="list">{products.map((product, index) => <div key={product.product_url}><ProductRow product={product} />
         {(!product.product_type || product.product_type === "unknown") && <label>Choose product type for {product.title}<select required value={product.product_type ?? "unknown"} onChange={(event) => setProducts((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, product_type: event.target.value as ProductType } : item))}><option value="unknown">Choose product type</option>{selectableProductTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
       </div>)}</div>
-      <button disabled={products.some((product) => !product.product_type || product.product_type === "unknown")} onClick={() => void runDemo()}>Try these products</button>
+      <button disabled={outfitBusy || products.some((product) => !product.product_type || product.product_type === "unknown")} onClick={() => void runDemo()}>Try these products</button>
       <button className="secondary" disabled={outfitBusy} onClick={openProfileManager}>Manage profile</button>
     </section>}
     {phase === "running" && <p role="status">Creating your previews...</p>}

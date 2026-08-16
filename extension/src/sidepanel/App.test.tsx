@@ -525,6 +525,30 @@ describe("App", () => {
     await act(async () => { finishReset(); await Promise.resolve(); });
   });
 
+  it("blocks Try while resetting an active outfit", async () => {
+    let finishReset!: () => void;
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+    vi.mocked(deleteActiveOutfit).mockReturnValue(new Promise((resolve) => { finishReset = resolve; }));
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
+    await renderApp();
+    const resetButton = [...host.querySelectorAll("button")].find((item) => item.textContent === "Reset to original profile photo") as HTMLButtonElement;
+    const tryButton = [...host.querySelectorAll("button")].find((item) => item.textContent === "Try these products") as HTMLButtonElement;
+
+    await act(async () => {
+      resetButton.click();
+      tryButton.click();
+      await Promise.resolve();
+    });
+
+    expect(deleteActiveOutfit).toHaveBeenCalledOnce();
+    expect(tryButton.disabled).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await act(async () => { finishReset(); await Promise.resolve(); });
+    expect(tryButton.disabled).toBe(false);
+  });
+
   it.each([
     ["non-image", new Response("html", { status: 200, headers: { "Content-Type": "text/html" } })],
     ["empty", new Response(new Blob([], { type: "image/jpeg" }), { status: 200 })],
