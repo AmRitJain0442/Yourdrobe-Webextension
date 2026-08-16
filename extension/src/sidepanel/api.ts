@@ -4,6 +4,8 @@ import type { ProfileAssetUpload, ProfileAttributes, RequirementKey } from "../p
 const baseUrl = "http://127.0.0.1:8001/v1";
 const requestTimeoutMs = 10_000;
 const batchTimeoutMs = 300_000;
+const maxResultImageBytes = 10 * 1024 * 1024;
+const acceptedResultImageTypes = new Set(["image/jpeg", "image/png"]);
 export type NormalizedProduct = Product & { id: string };
 export type Capabilities = {
   tryon_provider: "mock" | "youcam";
@@ -59,6 +61,32 @@ async function json<T>(path: string, init?: RequestInit, timeoutMs = requestTime
 
 export const getCapabilities = (signal?: AbortSignal) =>
   json<Capabilities>("/capabilities", { signal });
+
+export async function getResultImage(jobId: string, signal?: AbortSignal): Promise<Blob> {
+  const requestSignal = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(requestTimeoutMs)])
+    : AbortSignal.timeout(requestTimeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/tryons/${encodeURIComponent(jobId)}/result-image`, { signal: requestSignal });
+  } catch (reason) {
+    if (reason instanceof DOMException && (reason.name === "AbortError" || reason.name === "TimeoutError")) {
+      throw new Error("The local backend took too long. Please try again.");
+    }
+    throw new Error("The local backend is unavailable. Start it and try again.");
+  }
+  if (!response.ok) throw new Error("The local backend could not provide that preview. Please try again.");
+  let blob: Blob;
+  try {
+    blob = await response.blob();
+  } catch {
+    throw new Error("The local backend could not provide that preview. Please try again.");
+  }
+  if (!acceptedResultImageTypes.has(blob.type) || !blob.size || blob.size >= maxResultImageBytes) {
+    throw new Error("The local backend could not provide that preview. Please try again.");
+  }
+  return blob;
+}
 
 export async function startDemo(
   assets: ProfileAssetUpload[],

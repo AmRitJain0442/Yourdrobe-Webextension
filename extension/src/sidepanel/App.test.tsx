@@ -1,15 +1,19 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { deleteProfile, LocalProfileAssetMissingError, loadProfile, loadRequiredAssets, saveYouCamConsent } from "../profile/store";
-import type { ProfileMetadata } from "../profile/types";
+import { deleteActiveOutfit, deleteProfile, LocalProfileAssetMissingError, loadActiveOutfit, loadProfile, loadRequiredAssets, saveActiveOutfit, saveYouCamConsent } from "../profile/store";
+import type { ActiveOutfit, ProfileMetadata } from "../profile/types";
 import type { ProductType, TryOnJob } from "../types";
+import { getResultImage } from "./api";
 import { App } from "./App";
 
 vi.mock("../profile/store", () => ({
   loadProfile: vi.fn(),
   loadRequiredAssets: vi.fn(),
   loadLegacyImage: vi.fn().mockResolvedValue(null),
+  loadActiveOutfit: vi.fn(),
+  saveActiveOutfit: vi.fn(),
+  deleteActiveOutfit: vi.fn(),
   deleteProfile: vi.fn(),
   saveYouCamConsent: vi.fn(),
   LocalProfileAssetMissingError: class extends Error {},
@@ -35,6 +39,31 @@ const fullBodyProfile: ProfileMetadata = {
   consented_at: "2026-08-15T00:00:00.000Z",
   assets: { full_body_front: { role: "full_body_front", mime_type: "image/png", width: 400, height: 800, byte_size: 10, updated_at: "2026-08-15T00:00:00.000Z" } },
   attributes: {},
+};
+const activeTop: ActiveOutfit = {
+  metadata: {
+    version: 1,
+    job_id: "saved-job",
+    product_id: "saved-top",
+    product_title: "Saved linen top",
+    product_type: "top",
+    product_url: "https://amazon.in/dp/TOP",
+    mime_type: "image/jpeg",
+    byte_size: 6,
+    saved_at: "2026-08-16T00:00:00.000Z",
+  },
+  image_data_url: "data:image/jpeg;base64,active",
+};
+const activeDress: ActiveOutfit = {
+  metadata: {
+    ...activeTop.metadata,
+    job_id: "job",
+    product_id: "product",
+    product_title: product.title,
+    product_type: "dress",
+    product_url: product.product_url,
+  },
+  image_data_url: "data:image/jpeg;base64,cmVuZGVy",
 };
 
 async function renderApp() {
@@ -83,6 +112,7 @@ async function completeRun() {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   globalThis.chrome = {
     tabs: {
@@ -92,13 +122,19 @@ beforeEach(() => {
     storage: { local: { get: vi.fn().mockResolvedValue({}), set: vi.fn() } },
   } as unknown as typeof chrome;
   vi.mocked(loadProfile).mockResolvedValue(null);
+  vi.mocked(loadActiveOutfit).mockResolvedValue(null);
   vi.mocked(loadRequiredAssets).mockResolvedValue([]);
+  vi.mocked(saveActiveOutfit).mockResolvedValue(activeDress);
+  vi.mocked(deleteActiveOutfit).mockResolvedValue();
   vi.mocked(deleteProfile).mockResolvedValue();
   vi.mocked(saveYouCamConsent).mockResolvedValue({ ...fullBodyProfile, youcam_consented_at: "2026-08-16T00:00:00.000Z" });
   capabilities = { tryon_provider: "mock", live_product_types: [] };
   batchJob = { job_id: "job", product_id: "product", status: "completed", mock: true, result_url: "https://example.com/result.jpg" };
   fetchMock = vi.fn((input: string | URL | Request) => {
     const url = String(input);
+    if (url.endsWith("/tryons/job/result-image")) {
+      return Promise.resolve(new Response("render", { status: 200, headers: { "Content-Type": "image/jpeg" } }));
+    }
     const body = url.endsWith("/capabilities") ? capabilities
       : url.endsWith("/sessions") ? { session_id: "session" }
         : url.endsWith("/profiles") ? { profile_id: "profile" }
@@ -251,6 +287,219 @@ describe("App", () => {
     expect(JSON.stringify((chrome.storage.local.set as ReturnType<typeof vi.fn>).mock.calls)).not.toContain("provider.example/result.jpg");
   });
 
+  it("saves a completed live result as the active outfit", async () => {
+    mockCapabilities("youcam", ["dress"]);
+    mockCompletedJob();
+
+    await completeRun();
+    await click("Use as active outfit");
+
+    expect(saveActiveOutfit).toHaveBeenCalledWith(expect.any(Blob), expect.objectContaining({
+      job_id: "job", product_id: "product", product_type: "dress",
+    }));
+    expect(host.textContent).toContain("Active outfit");
+    expect(host.textContent).toContain("Saved only in this browser on this device.");
+  });
+
+  it("accepts a PNG completed-live image from the local backend", async () => {
+    mockCompletedJob();
+    fetchMock.mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/tryons/job/result-image")) {
+        return Promise.resolve(new Response("render", { status: 200, headers: { "Content-Type": "image/png" } }));
+      }
+      const body = url.endsWith("/capabilities") ? capabilities
+        : url.endsWith("/sessions") ? { session_id: "session" }
+          : url.endsWith("/profiles") ? { profile_id: "profile" }
+            : url.endsWith("/products/normalize") ? { products: [{ ...product, product_type: "dress", id: "product" }] }
+              : { jobs: [batchJob] };
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+
+    await completeRun();
+    await click("Use as active outfit");
+
+    expect((vi.mocked(saveActiveOutfit).mock.calls[0][0] as Blob).type).toBe("image/png");
+  });
+
+  it("uses a saved top as the shared source for later bottoms", async () => {
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    const secondProduct = { ...product, title: "Second bottom", product_url: "https://amazon.in/dp/BOTTOM2", product_type: "bottom" as const };
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      products: [{ ...product, product_type: "bottom" }, secondProduct],
+    });
+    fetchMock.mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      const body = url.endsWith("/capabilities") ? capabilities
+        : url.endsWith("/sessions") ? { session_id: "session" }
+          : url.endsWith("/profiles") ? { profile_id: "profile" }
+            : url.endsWith("/products/normalize") ? { products: [{ ...product, product_type: "bottom", id: "product" }, { ...secondProduct, id: "product-2" }] }
+              : { jobs: [
+                { job_id: "job", product_id: "product", status: "completed", mock: true, result_url: "https://example.com/one.jpg" },
+                { job_id: "job-2", product_id: "product-2", status: "completed", mock: true, result_url: "https://example.com/two.jpg" },
+              ] };
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+
+    await renderApp();
+
+    const panel = host.querySelector("article.active-outfit") as HTMLElement;
+    expect(panel.textContent).toContain("Saved linen top");
+    expect(panel.textContent).toContain("top");
+    expect(panel.querySelector("img")?.getAttribute("src")).toBe("data:image/jpeg;base64,active");
+    expect(panel.querySelector('a[href="https://amazon.in/dp/TOP"]')).not.toBeNull();
+
+    await click("Try these products");
+
+    expect(loadRequiredAssets).toHaveBeenCalledWith([]);
+    const batch = requestBody("/tryons/batch");
+    expect(batch.product_ids).toEqual(["product", "product-2"]);
+    expect(batch.outfit_base_image_data_url).toBe("data:image/jpeg;base64,active");
+    expect(batch.assets).toEqual([]);
+    expect(requestBody("/products/normalize").products).toHaveLength(2);
+  });
+
+  it.each([
+    ["mock", { status: "completed", mock: true, result_url: "https://example.com/mock.jpg" }],
+    ["failed", { status: "failed", mock: false, result_url: "https://provider.example/result.jpg" }],
+    ["incomplete", { status: "completed", mock: false, result_url: "" }],
+    ["unverified", { status: "completed", mock: undefined, result_url: "https://provider.example/result.jpg" }],
+  ] as const)("does not offer active-outfit saving for a %s result", async (_label, overrides) => {
+    mockCompletedJob(overrides);
+    await completeRun();
+    expect([...host.querySelectorAll("button")].some((button) => button.textContent === "Use as active outfit")).toBe(false);
+  });
+
+  it("preserves the previous outfit when saving fails", async () => {
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    vi.mocked(saveActiveOutfit).mockRejectedValue(new Error("Storage unavailable."));
+    mockCompletedJob();
+
+    await completeRun();
+    await click("Use as active outfit");
+
+    expect(host.querySelector("article.active-outfit")?.textContent).toContain("Saved linen top");
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("Storage unavailable.");
+  });
+
+  it("preserves the previous outfit when reset fails", async () => {
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    vi.mocked(deleteActiveOutfit).mockRejectedValue(new Error("Storage unavailable."));
+
+    await renderApp();
+    await click("Reset to original profile photo");
+
+    expect(host.querySelector("article.active-outfit")?.textContent).toContain("Saved linen top");
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("Storage unavailable.");
+  });
+
+  it("resets the active outfit and restores original profile sourcing", async () => {
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
+
+    await renderApp();
+    await click("Reset to original profile photo");
+    await click("Try these products");
+
+    expect(deleteActiveOutfit).toHaveBeenCalledOnce();
+    expect(loadRequiredAssets).toHaveBeenCalledWith(["full_body_front"]);
+    expect(requestBody("/tryons/batch")).not.toHaveProperty("outfit_base_image_data_url");
+  });
+
+  it("keeps active-outfit save single-flight and disabled while busy", async () => {
+    let finishSave!: (value: ActiveOutfit) => void;
+    vi.mocked(saveActiveOutfit).mockReturnValue(new Promise((resolve) => { finishSave = resolve; }));
+    mockCompletedJob();
+    await completeRun();
+    const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Use as active outfit") as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+      button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(saveActiveOutfit).toHaveBeenCalledOnce();
+    expect(button.disabled).toBe(true);
+    expect(host.querySelector('[role="status"]')?.textContent).toContain("Saving active outfit");
+
+    await act(async () => { finishSave(activeDress); await Promise.resolve(); });
+  });
+
+  it("keeps active-outfit reset single-flight and disabled while busy", async () => {
+    let finishReset!: () => void;
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    vi.mocked(deleteActiveOutfit).mockReturnValue(new Promise((resolve) => { finishReset = resolve; }));
+    await renderApp();
+    const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Reset to original profile photo") as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+      button.click();
+      await Promise.resolve();
+    });
+
+    expect(deleteActiveOutfit).toHaveBeenCalledOnce();
+    expect(button.disabled).toBe(true);
+    expect(host.querySelector('[role="status"]')?.textContent).toContain("Resetting active outfit");
+
+    await act(async () => { finishReset(); await Promise.resolve(); });
+  });
+
+  it.each([
+    ["non-image", new Response("html", { status: 200, headers: { "Content-Type": "text/html" } })],
+    ["empty", new Response(new Blob([], { type: "image/jpeg" }), { status: 200 })],
+    ["too large", new Response(new Blob([new Uint8Array(10 * 1024 * 1024)], { type: "image/png" }), { status: 200 })],
+    ["failed", new Response("no", { status: 502 })],
+  ])("rejects a %s backend result image without replacing the active outfit", async (_label, imageResponse) => {
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    mockCompletedJob();
+    fetchMock.mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/tryons/job/result-image")) return Promise.resolve(imageResponse);
+      const body = url.endsWith("/capabilities") ? capabilities
+        : url.endsWith("/sessions") ? { session_id: "session" }
+          : url.endsWith("/profiles") ? { profile_id: "profile" }
+            : url.endsWith("/products/normalize") ? { products: [{ ...product, product_type: "dress", id: "product" }] }
+              : { jobs: [batchJob] };
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+
+    await completeRun();
+    await click("Use as active outfit");
+
+    expect(saveActiveOutfit).not.toHaveBeenCalled();
+    expect(host.querySelector("article.active-outfit")?.textContent).toContain("Saved linen top");
+    const message = host.querySelector('[role="alert"]')?.textContent ?? "";
+    expect(message).toContain("local backend");
+    expect(message).not.toContain("provider.example");
+  });
+
+  it("times out an active-outfit image download after ten seconds", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), milliseconds);
+      return controller.signal;
+    });
+    vi.stubGlobal("fetch", vi.fn((_input: string | URL | Request, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    })));
+
+    let settled = false;
+    const pending = getResultImage("job");
+    void pending.then(() => { settled = true; }, () => { settled = true; });
+
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).rejects.toThrow("The local backend took too long. Please try again.");
+  });
+
   it("does not show the listing image as a completed live result", async () => {
     mockCapabilities("youcam", ["dress"]);
     mockCompletedJob({ mock: false, result_url: "" });
@@ -377,6 +626,20 @@ describe("App", () => {
     });
     expect(host.textContent).not.toContain("Manage your profile");
     expect(host.textContent).toContain("products ready");
+  });
+
+  it("refreshes to no active outfit after complete-profile deletion", async () => {
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+    vi.mocked(loadActiveOutfit).mockResolvedValueOnce(activeTop).mockResolvedValueOnce(null);
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+
+    await renderApp();
+    expect(host.querySelector("article.active-outfit")?.textContent).toContain("Saved linen top");
+    await click("Manage profile");
+    await click("Delete complete profile");
+
+    expect(loadActiveOutfit).toHaveBeenCalledTimes(2);
+    expect(host.querySelector("article.active-outfit")).toBeNull();
   });
 
   it("polls processing jobs every two seconds", async () => {

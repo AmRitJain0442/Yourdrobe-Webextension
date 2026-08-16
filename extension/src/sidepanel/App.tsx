@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { ExtractProductsResponse, Product, ProductType, TryOnJob } from "../types";
 import { missingRequirements, requirementsForProducts, rolesForRequirement } from "../profile/requirements";
-import { LocalProfileAssetMissingError, loadLegacyImage, loadProfile, loadRequiredAssets, saveYouCamConsent } from "../profile/store";
-import type { PhotoRole, ProfileMetadata, RequirementKey } from "../profile/types";
-import { getCapabilities, getJob, MissingProfileAssetsError, startDemo, type NormalizedProduct } from "./api";
+import { deleteActiveOutfit, LocalProfileAssetMissingError, loadActiveOutfit, loadLegacyImage, loadProfile, loadRequiredAssets, saveActiveOutfit, saveYouCamConsent } from "../profile/store";
+import type { ActiveOutfit, PhotoRole, ProfileMetadata, RequirementKey } from "../profile/types";
+import { getCapabilities, getJob, getResultImage, MissingProfileAssetsError, startDemo, type NormalizedProduct } from "./api";
 import { ProfileSetup } from "./ProfileSetup";
 import { ProfileManager } from "./ProfileManager";
 import { YouCamConsent } from "./YouCamConsent";
@@ -30,12 +30,17 @@ export function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [profile, setProfile] = useState<ProfileMetadata | null>(null);
   const [legacyImage, setLegacyImage] = useState<string | null>(null);
+  const [activeOutfit, setActiveOutfit] = useState<ActiveOutfit | null>(null);
   const [missing, setMissing] = useState<RequirementKey[]>([]);
   const [results, setResults] = useState<Result[]>([]);
   const [error, setError] = useState("");
   const [consentBusy, setConsentBusy] = useState(false);
   const [consentError, setConsentError] = useState("");
+  const [outfitBusy, setOutfitBusy] = useState(false);
+  const [outfitStatus, setOutfitStatus] = useState("");
+  const [outfitError, setOutfitError] = useState("");
   const activeRequest = useRef<AbortController | null>(null);
+  const outfitMutation = useRef(false);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -54,11 +59,13 @@ export function App() {
       }),
       loadProfile(),
       loadLegacyImage(),
-    ]).then(([foundProducts, foundProfile, foundLegacyImage]) => {
+      loadActiveOutfit(),
+    ]).then(([foundProducts, foundProfile, foundLegacyImage, foundActiveOutfit]) => {
       if (cancelled) return;
       setProducts(foundProducts);
       setProfile(foundProfile);
       setLegacyImage(foundLegacyImage);
+      setActiveOutfit(foundActiveOutfit);
       setPhase(foundProducts.length ? "ready" : "empty");
     }).catch((reason: unknown) => {
       if (cancelled) return;
@@ -73,14 +80,17 @@ export function App() {
   }, []);
 
   async function reloadProfile() {
-    const [nextProfile, nextLegacyImage] = await Promise.all([loadProfile(), loadLegacyImage()]);
+    const [nextProfile, nextLegacyImage, nextActiveOutfit] = await Promise.all([loadProfile(), loadLegacyImage(), loadActiveOutfit()]);
     setProfile(nextProfile);
     setLegacyImage(nextLegacyImage);
+    setActiveOutfit(nextActiveOutfit);
   }
 
   async function runDemo(currentProfile = profile) {
     const selectedProducts = products.slice(0, 5);
-    const required = missingRequirements(selectedProducts, Object.keys(currentProfile?.assets ?? {}) as PhotoRole[]);
+    const availableRoles = Object.keys(currentProfile?.assets ?? {}) as PhotoRole[];
+    if (activeOutfit) availableRoles.push("full_body_front");
+    const required = missingRequirements(selectedProducts, availableRoles);
     if (required.length) {
       setMissing(required);
       setPhase("profile-setup");
@@ -104,11 +114,13 @@ export function App() {
         return;
       }
       const available = new Set(Object.keys(currentProfile?.assets ?? {}) as PhotoRole[]);
-      const roles = requirementsForProducts(selectedProducts).map((requirement) =>
+      const roles = requirementsForProducts(selectedProducts)
+        .filter((requirement) => requirement !== "full_body_front" || !activeOutfit)
+        .map((requirement) =>
         rolesForRequirement(requirement).find((role) => available.has(role)) ?? rolesForRequirement(requirement)[0],
       );
       const assets = await loadRequiredAssets(roles);
-      const started = await startDemo(assets, currentProfile?.attributes ?? {}, selectedProducts, Boolean(currentProfile?.youcam_consented_at), undefined, request.signal);
+      const started = await startDemo(assets, currentProfile?.attributes ?? {}, selectedProducts, Boolean(currentProfile?.youcam_consented_at), activeOutfit?.image_data_url, request.signal);
       if (request.signal.aborted) return;
       pollDeadline = new AbortController();
       pollDeadlineTimer = setTimeout(
@@ -148,7 +160,9 @@ export function App() {
       if (reason instanceof LocalProfileAssetMissingError) {
         const repaired = await loadProfile();
         setProfile(repaired);
-        setMissing(missingRequirements(selectedProducts, Object.keys(repaired?.assets ?? {}) as PhotoRole[]));
+        const repairedRoles = Object.keys(repaired?.assets ?? {}) as PhotoRole[];
+        if (activeOutfit) repairedRoles.push("full_body_front");
+        setMissing(missingRequirements(selectedProducts, repairedRoles));
         setPhase("profile-setup");
         return;
       }
@@ -177,10 +191,62 @@ export function App() {
     }
   }
 
+  async function useAsActiveOutfit(result: Result) {
+    if (outfitMutation.current) return;
+    outfitMutation.current = true;
+    setOutfitBusy(true);
+    setOutfitStatus("Saving active outfit...");
+    setOutfitError("");
+    try {
+      const blob = await getResultImage(result.job.job_id);
+      const saved = await saveActiveOutfit(blob, {
+        job_id: result.job.job_id,
+        product_id: result.product.id,
+        product_title: result.product.title,
+        product_type: result.product.product_type ?? "unknown",
+        product_url: result.product.product_url,
+      });
+      if (!mounted.current) return;
+      setActiveOutfit(saved);
+      setOutfitStatus("Active outfit saved.");
+    } catch (reason) {
+      if (!mounted.current) return;
+      setOutfitStatus("");
+      setOutfitError(reason instanceof Error ? reason.message : "We could not save that outfit. Please try again.");
+    } finally {
+      outfitMutation.current = false;
+      if (mounted.current) setOutfitBusy(false);
+    }
+  }
+
+  async function resetActiveOutfit() {
+    if (outfitMutation.current) return;
+    outfitMutation.current = true;
+    setOutfitBusy(true);
+    setOutfitStatus("Resetting active outfit...");
+    setOutfitError("");
+    try {
+      await deleteActiveOutfit();
+      if (!mounted.current) return;
+      setActiveOutfit(null);
+      setOutfitStatus("Active outfit reset.");
+    } catch (reason) {
+      if (!mounted.current) return;
+      setOutfitStatus("");
+      setOutfitError(reason instanceof Error ? reason.message : "We could not reset that outfit. Please try again.");
+    } finally {
+      outfitMutation.current = false;
+      if (mounted.current) setOutfitBusy(false);
+    }
+  }
+
   return <main>
     <header><span className="eyebrow">Yourdrobe</span><h1>Your fitting room, anywhere.</h1></header>
     {phase === "loading" && <p role="status">Reading products from this page...</p>}
-    {phase === "profile-setup" && <ProfileSetup requirements={missing} productTypes={products.map((product) => product.product_type ?? "unknown")} onSaved={() => void loadProfile().then((next) => { setProfile(next); setPhase("ready"); })} onCancel={() => setPhase("ready")} />}
+    {(phase === "ready" || phase === "results") && activeOutfit && <ActiveOutfitPanel outfit={activeOutfit} busy={outfitBusy} onReset={() => void resetActiveOutfit()} />}
+    {(phase === "ready" || phase === "results") && outfitStatus && <p className="outfit-message" role="status">{outfitStatus}</p>}
+    {(phase === "ready" || phase === "results") && outfitError && <p className="error outfit-message" role="alert">{outfitError}</p>}
+    {phase === "profile-setup" && <ProfileSetup requirements={missing} productTypes={products.map((product) => product.product_type ?? "unknown")} onSaved={() => void reloadProfile().then(() => setPhase("ready"))} onCancel={() => setPhase("ready")} />}
     {phase === "profile-manager" && <ProfileManager profile={profile} legacyImage={legacyImage} onChanged={reloadProfile} onClose={() => setPhase(products.length ? "ready" : "empty")} />}
     {phase === "youcam-consent" && <div className="youcam-consent"><YouCamConsent busy={consentBusy} error={consentError} onAccept={() => void acceptYouCamConsent()} onCancel={() => setPhase("ready")} /></div>}
     {phase === "ready" && <section>
@@ -202,6 +268,7 @@ export function App() {
           {failed
             ? <p className="error">{job.error_message ?? "This product preview failed. You can still view the original listing."}</p>
             : <img src={job.result_url || product.image_url} alt={`Preview of ${product.title}`} />}
+          {job.status === "completed" && job.mock === false && isHttpsUrl(job.result_url) && <button disabled={outfitBusy} onClick={() => void useAsActiveOutfit({ product, job })}>Use as active outfit</button>}
           <a className="button secondary" href={product.product_url} target="_blank" rel="noreferrer">View original product</a>
         </article>;
       })}</div>
@@ -209,6 +276,17 @@ export function App() {
     </section>}
     {phase === "error" && <section><p className="error" role="alert">{error}</p><button onClick={() => location.reload()}>Retry</button></section>}
   </main>;
+}
+
+function ActiveOutfitPanel({ outfit, busy, onReset }: { outfit: ActiveOutfit; busy: boolean; onReset: () => void }) {
+  return <article className="product active-outfit" aria-labelledby="active-outfit-heading">
+    <h2 id="active-outfit-heading">Active outfit</h2>
+    <img src={outfit.image_data_url} alt={`Active outfit: ${outfit.metadata.product_title}`} />
+    <div><h3>{outfit.metadata.product_title}</h3><p>Product type: {outfit.metadata.product_type}</p></div>
+    <p>Saved only in this browser on this device.</p>
+    <a href={outfit.metadata.product_url} target="_blank" rel="noreferrer">View original product</a>
+    <button className="secondary" disabled={busy} onClick={onReset}>Reset to original profile photo</button>
+  </article>;
 }
 
 function ProductRow({ product }: { product: Product }) {

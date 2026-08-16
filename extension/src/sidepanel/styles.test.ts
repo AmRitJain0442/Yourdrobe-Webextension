@@ -14,4 +14,10 @@ describe("side panel button contrast", () => {
   it("preserves the danger hover foreground and background pairing", () => {
     expect(css).toMatch(/\.danger:hover\s*{[^}]*background: var\(--danger-hover\);[^}]*color: var\(--danger-text\);/);
   });
+
+  it("keeps active-outfit controls visibly busy and the preview contained", () => {
+    expect(css).toMatch(/button:disabled\s*{[^}]*cursor:[^;]+;[^}]*opacity:[^;]+;/);
+    expect(css).toMatch(/\.active-outfit\s*{[^}]*margin-bottom:[^;]+;/);
+    expect(css).toMatch(/\.active-outfit img\s*{[^}]*max-height:[^;]+;[^}]*object-fit:\s*contain;/);
+  });
 });
