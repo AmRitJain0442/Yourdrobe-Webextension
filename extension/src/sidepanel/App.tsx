@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { ExtractProductsResponse, Product, ProductType, TryOnJob } from "../types";
 import { missingRequirements, profilePhotoRoles, requirementsForProducts, rolesForRequirement } from "../profile/requirements";
-import { deleteActiveOutfit, LocalProfileAssetMissingError, loadActiveOutfit, loadLegacyImage, loadProfile, loadRequiredAssets, saveActiveOutfit, saveYouCamConsent } from "../profile/store";
-import type { ActiveOutfit, PhotoRole, ProfileMetadata, RequirementKey } from "../profile/types";
+import { deleteActiveOutfit, LocalProfileAssetMissingError, loadActiveOutfit, loadLegacyImage, loadOutfitItems, loadProfile, loadRequiredAssets, removeOutfitItem, saveActiveOutfit, saveOutfitItem, saveYouCamConsent } from "../profile/store";
+import type { ActiveOutfit, OutfitItem, PhotoRole, ProfileMetadata, RequirementKey } from "../profile/types";
 import { getCapabilities, getJob, getResultImage, MissingProfileAssetsError, startDemo, type NormalizedProduct } from "./api";
 import { ProfileSetup } from "./ProfileSetup";
 import { ProfileManager } from "./ProfileManager";
@@ -10,6 +10,7 @@ import { YouCamConsent } from "./YouCamConsent";
 
 type Phase = "loading" | "profile-setup" | "profile-manager" | "youcam-consent" | "ready" | "running" | "results" | "empty" | "error";
 type Result = { product: NormalizedProduct; job: TryOnJob };
+type FinalizeResult = { added: number; needs_attention: string[]; carts_opened: number; error?: string };
 const unsupported = "Open a supported Amazon, Flipkart, or Nykaa listing page and try again.";
 const maxPolls = 40;
 const pollDelayMs = 2_000;
@@ -50,6 +51,13 @@ async function extractProducts(tabId?: number) {
     throw new Error(unsupported);
   }
 }
+const outfitItem = (product: Product): OutfitItem | null => product.product_type ? {
+  platform: product.platform,
+  title: product.title,
+  product_type: product.product_type,
+  product_url: product.product_url,
+  image_url: product.image_url,
+} : null;
 
 export function App() {
   const [phase, setPhase] = useState<Phase>("loading");
@@ -57,6 +65,7 @@ export function App() {
   const [profile, setProfile] = useState<ProfileMetadata | null>(null);
   const [legacyImage, setLegacyImage] = useState<string | null>(null);
   const [activeOutfit, setActiveOutfit] = useState<ActiveOutfit | null>(null);
+  const [outfitItems, setOutfitItems] = useState<OutfitItem[]>([]);
   const [missing, setMissing] = useState<RequirementKey[]>([]);
   const [results, setResults] = useState<Result[]>([]);
   const [error, setError] = useState("");
@@ -69,6 +78,9 @@ export function App() {
   const [searchStore, setSearchStore] = useState<SearchStore>("amazon_in");
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchError, setSearchError] = useState("");
+  const [finalizeBusy, setFinalizeBusy] = useState(false);
+  const [finalizeStatus, setFinalizeStatus] = useState("");
+  const [finalizeError, setFinalizeError] = useState("");
   const activeRequest = useRef<AbortController | null>(null);
   const outfitMutation = useRef(false);
   const mounted = useRef(true);
@@ -82,13 +94,15 @@ export function App() {
       loadProfile(),
       loadLegacyImage(),
       loadActiveOutfit(),
-    ]).then(([foundProducts, foundProfile, foundLegacyImage, foundActiveOutfit]) => {
+      loadOutfitItems(),
+    ]).then(([foundProducts, foundProfile, foundLegacyImage, foundActiveOutfit, foundOutfitItems]) => {
       if (cancelled) return;
       setProducts(foundProducts);
       if (foundProducts[0]) setSearchStore(foundProducts[0].platform);
       setProfile(foundProfile);
       setLegacyImage(foundLegacyImage);
       setActiveOutfit(foundActiveOutfit);
+      setOutfitItems(foundOutfitItems);
       setPhase(foundProducts.length ? "ready" : "empty");
     }).catch((reason: unknown) => {
       if (cancelled) return;
@@ -122,10 +136,11 @@ export function App() {
   }, []);
 
   async function reloadProfile() {
-    const [nextProfile, nextLegacyImage, nextActiveOutfit] = await Promise.all([loadProfile(), loadLegacyImage(), loadActiveOutfit()]);
+    const [nextProfile, nextLegacyImage, nextActiveOutfit, nextOutfitItems] = await Promise.all([loadProfile(), loadLegacyImage(), loadActiveOutfit(), loadOutfitItems()]);
     setProfile(nextProfile);
     setLegacyImage(nextLegacyImage);
     setActiveOutfit(nextActiveOutfit);
+    setOutfitItems(nextOutfitItems);
   }
 
   async function searchProducts(event: FormEvent<HTMLFormElement>) {
@@ -156,7 +171,8 @@ export function App() {
       setPhase("profile-setup");
       return;
     }
-    const selectedProducts = products.slice(0, 5);
+    const selectedProducts = products.slice(0, 5).filter((product) => !activeOutfit || activeOutfitProductTypes.has(product.product_type ?? "unknown"));
+    if (!selectedProducts.length) return;
     const outfitBaseImageDataUrl = activeOutfit && selectedProducts.some((product) => activeOutfitProductTypes.has(product.product_type ?? "unknown"))
       ? activeOutfit.image_data_url
       : undefined;
@@ -279,8 +295,11 @@ export function App() {
         product_type: result.product.product_type ?? "unknown",
         product_url: result.product.product_url,
       });
+      const item = outfitItem(result.product);
+      const nextItems = item ? await saveOutfitItem(item) : outfitItems;
       if (!mounted.current) return;
       setActiveOutfit(saved);
+      setOutfitItems(nextItems);
       setOutfitStatus("Active outfit saved.");
     } catch (reason) {
       if (!mounted.current) return;
@@ -302,6 +321,7 @@ export function App() {
       await deleteActiveOutfit();
       if (!mounted.current) return;
       setActiveOutfit(null);
+      setOutfitItems([]);
       setOutfitStatus("Active outfit reset.");
     } catch (reason) {
       if (!mounted.current) return;
@@ -313,6 +333,62 @@ export function App() {
     }
   }
 
+  async function addWithoutPreview(product: Product) {
+    const item = outfitItem(product);
+    if (!activeOutfit || !item || outfitMutation.current) return;
+    outfitMutation.current = true;
+    setOutfitBusy(true);
+    setOutfitStatus("Adding product to outfit...");
+    setOutfitError("");
+    try {
+      const nextItems = await saveOutfitItem(item);
+      if (!mounted.current) return;
+      setOutfitItems(nextItems);
+      setOutfitStatus("Product added without a generated preview.");
+    } catch (reason) {
+      if (!mounted.current) return;
+      setOutfitStatus("");
+      setOutfitError(reason instanceof Error ? reason.message : "We could not add that product.");
+    } finally {
+      outfitMutation.current = false;
+      if (mounted.current) setOutfitBusy(false);
+    }
+  }
+
+  async function removeSelectedProduct(productUrl: string) {
+    if (outfitMutation.current || finalizeBusy) return;
+    outfitMutation.current = true;
+    setOutfitBusy(true);
+    try {
+      setOutfitItems(await removeOutfitItem(productUrl));
+      setOutfitStatus("Product removed from outfit.");
+    } catch (reason) {
+      setOutfitError(reason instanceof Error ? reason.message : "We could not remove that product.");
+    } finally {
+      outfitMutation.current = false;
+      if (mounted.current) setOutfitBusy(false);
+    }
+  }
+
+  async function finalizeOutfit() {
+    if (!outfitItems.length || finalizeBusy || outfitMutation.current) return;
+    setFinalizeBusy(true);
+    setFinalizeStatus("");
+    setFinalizeError("");
+    try {
+      const result = await chrome.runtime.sendMessage<unknown, FinalizeResult>({ type: "FINALIZE_OUTFIT", items: outfitItems });
+      if (!mounted.current) return;
+      if (result.error) throw new Error(result.error);
+      const cartText = result.carts_opened === 1 ? "The retailer cart is open." : `${result.carts_opened} retailer carts are open.`;
+      const attention = result.needs_attention.length ? ` ${result.needs_attention.length} product pages need a size, colour, or other selection.` : "";
+      setFinalizeStatus(`${result.added} products added. ${cartText}${attention}`);
+    } catch (reason) {
+      if (mounted.current) setFinalizeError(reason instanceof Error ? reason.message : "We could not finalize this outfit.");
+    } finally {
+      if (mounted.current) setFinalizeBusy(false);
+    }
+  }
+
   function openProfileManager() {
     if (!outfitMutation.current) setPhase("profile-manager");
   }
@@ -320,9 +396,11 @@ export function App() {
   return <main>
     <header><span className="eyebrow">Yourdrobe</span><h1>Your fitting room, anywhere.</h1></header>
     {phase === "loading" && <p role="status">Reading products from this page...</p>}
-    {(phase === "ready" || phase === "results") && activeOutfit && <ActiveOutfitPanel outfit={activeOutfit} busy={outfitBusy} onReset={() => void resetActiveOutfit()} />}
+    {(phase === "ready" || phase === "results") && activeOutfit && <ActiveOutfitPanel outfit={activeOutfit} items={outfitItems} busy={outfitBusy || finalizeBusy} onRemove={(url) => void removeSelectedProduct(url)} onFinalize={() => void finalizeOutfit()} onReset={() => void resetActiveOutfit()} />}
     {(phase === "ready" || phase === "results") && outfitStatus && <p className="outfit-message" role="status">{outfitStatus}</p>}
     {(phase === "ready" || phase === "results") && outfitError && <p className="error outfit-message" role="alert">{outfitError}</p>}
+    {(phase === "ready" || phase === "results") && finalizeStatus && <p className="outfit-message" role="status">{finalizeStatus}</p>}
+    {(phase === "ready" || phase === "results") && finalizeError && <p className="error outfit-message" role="alert">{finalizeError}</p>}
     {phase === "profile-setup" && <ProfileSetup existingRoles={(Object.keys(profile?.assets ?? {}) as PhotoRole[]).filter((role) =>
       !missing.some((requirement) => rolesForRequirement(requirement).includes(role))
     )} onSaved={() => void reloadProfile().then(() => setPhase("ready"))} onCancel={() => setPhase("ready")} />}
@@ -332,9 +410,10 @@ export function App() {
       <h2>{products.length} products ready</h2>
       <div className="list preview-strip">{products.map((product, index) => <div key={product.product_url}><ProductRow product={product} />
         {(!product.product_type || product.product_type === "unknown") && <label>Choose product type for {product.title}<select required value={product.product_type ?? "unknown"} onChange={(event) => setProducts((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, product_type: event.target.value as ProductType } : item))}><option value="unknown">Choose product type</option>{selectableProductTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
+        {activeOutfit && product.product_type && product.product_type !== "unknown" && !activeOutfitProductTypes.has(product.product_type) && <button className="secondary" disabled={outfitBusy} onClick={() => void addWithoutPreview(product)}>Add to outfit without preview</button>}
       </div>)}</div>
       {canExtendActiveOutfit && <p><strong>Add-on mode:</strong> clothing previews will start from your saved active outfit.</p>}
-      <button disabled={outfitBusy || products.some((product) => !product.product_type || product.product_type === "unknown")} onClick={() => void runDemo()}>{canExtendActiveOutfit ? "Add these products to active outfit" : "Try these products"}</button>
+      {(!activeOutfit || products.some((product) => activeOutfitProductTypes.has(product.product_type ?? "unknown"))) && <button disabled={outfitBusy || products.some((product) => !product.product_type || product.product_type === "unknown")} onClick={() => void runDemo()}>{canExtendActiveOutfit ? "Add these products to active outfit" : "Try these products"}</button>}
       <button className="secondary" disabled={outfitBusy} onClick={openProfileManager}>Manage profile</button>
     </section>}
     {phase === "running" && <p role="status">Creating your previews...</p>}
@@ -368,12 +447,15 @@ export function App() {
   </main>;
 }
 
-function ActiveOutfitPanel({ outfit, busy, onReset }: { outfit: ActiveOutfit; busy: boolean; onReset: () => void }) {
+function ActiveOutfitPanel({ outfit, items, busy, onRemove, onFinalize, onReset }: { outfit: ActiveOutfit; items: OutfitItem[]; busy: boolean; onRemove: (url: string) => void; onFinalize: () => void; onReset: () => void }) {
+  const displayed = items.length ? items : [{ title: outfit.metadata.product_title, product_type: outfit.metadata.product_type, product_url: outfit.metadata.product_url }];
   return <article className="product active-outfit" aria-labelledby="active-outfit-heading">
     <h2 id="active-outfit-heading">Active outfit</h2>
     <img src={outfit.image_data_url} alt={`Active outfit: ${outfit.metadata.product_title}`} />
-    <div><h3>{outfit.metadata.product_title}</h3><p>Product type: {outfit.metadata.product_type}</p></div>
+    <div><h3>{displayed.length} selected {displayed.length === 1 ? "product" : "products"}</h3><ul className="outfit-items">{displayed.map((item) => <li key={item.product_url}><span>{item.title} · {item.product_type}</span>{items.length > 0 && !activeOutfitProductTypes.has(item.product_type) && <button className="text-action" disabled={busy} aria-label={`Remove ${item.title}`} onClick={() => onRemove(item.product_url)}>Remove</button>}</li>)}</ul></div>
     <p>Saved browser-locally on this device. Using it for another live preview uploads this saved image to Perfect Corp.</p>
+    <p>Finalizing opens each product page, adds available items to the retailer cart, and then opens the cart. Products needing a size, colour, or sign-in stay open for you.</p>
+    <button disabled={busy || !items.length} onClick={onFinalize}>Finalize outfit and open carts</button>
     <a href={outfit.metadata.product_url} target="_blank" rel="noreferrer">View original product</a>
     <button className="secondary" disabled={busy} onClick={onReset}>Reset to original profile photo</button>
   </article>;

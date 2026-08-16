@@ -1,6 +1,6 @@
 import type { ProductType } from "../types";
 import { prepareProfileImage } from "./image";
-import type { ActiveOutfit, ActiveOutfitInput, ActiveOutfitMetadata, PhotoRole, PreparedProfileImage, ProfileAssetUpload, ProfileAttributes, ProfileMetadata } from "./types";
+import type { ActiveOutfit, ActiveOutfitInput, ActiveOutfitMetadata, OutfitItem, PhotoRole, PreparedProfileImage, ProfileAssetUpload, ProfileAttributes, ProfileMetadata } from "./types";
 
 const databaseName = "yourdrobe_profile";
 const objectStoreName = "assets";
@@ -8,6 +8,7 @@ const metadataKey = "yourdrobe_profile_v2";
 const legacyKey = "yourdrobe_profile_image";
 const activeOutfitBlobKey = "active_outfit";
 const activeOutfitMetadataKey = "yourdrobe_active_outfit_v1";
+const outfitItemsKey = "yourdrobe_outfit_items_v1";
 const acceptedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const acceptedActiveOutfitTypes = new Set(["image/jpeg", "image/png"]);
 const acceptedProductTypes = new Set<ProductType>([
@@ -15,6 +16,9 @@ const acceptedProductTypes = new Set<ProductType>([
   "belt", "bag", "watch", "bracelet", "ring", "footwear", "unknown",
 ]);
 const maxActiveOutfitBytes = 10 * 1024 * 1024;
+const platformHosts: Record<OutfitItem["platform"], string> = {
+  amazon_in: "amazon.in", amazon_us: "amazon.com", flipkart: "flipkart.com", nykaa: "nykaa.com",
+};
 
 let database: Promise<IDBDatabase> | undefined;
 let profileOperations: Promise<void> = Promise.resolve();
@@ -106,10 +110,27 @@ function isActiveOutfitMetadata(value: unknown): value is ActiveOutfitMetadata {
     && typeof metadata.saved_at === "string";
 }
 
+function isOutfitItem(value: unknown): value is OutfitItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  if (Object.keys(item).length !== 5 || typeof item.platform !== "string" || !(item.platform in platformHosts)
+    || typeof item.title !== "string" || !item.title.trim() || item.title.length > 300
+    || !acceptedProductTypes.has(item.product_type as ProductType)
+    || typeof item.product_url !== "string" || typeof item.image_url !== "string") return false;
+  try {
+    const productUrl = new URL(item.product_url);
+    return productUrl.protocol === "https:"
+      && productUrl.hostname.toLowerCase().replace(/^www\./, "") === platformHosts[item.platform as OutfitItem["platform"]]
+      && (!item.image_url || new URL(item.image_url).protocol === "https:");
+  } catch {
+    return false;
+  }
+}
+
 async function removeActiveOutfit(previousBlob?: Blob): Promise<void> {
   await transaction("readwrite", (store) => store.delete(activeOutfitBlobKey));
   try {
-    await chrome.storage.local.remove(activeOutfitMetadataKey);
+    await chrome.storage.local.remove([activeOutfitMetadataKey, outfitItemsKey]);
   } catch (error) {
     if (previousBlob) await transaction("readwrite", (store) => store.put(previousBlob, activeOutfitBlobKey));
     throw error;
@@ -185,6 +206,46 @@ export function deleteActiveOutfit(): Promise<void> {
   return withProfileLock(async () => {
     const previousBlob = await transaction<Blob | undefined>("readonly", (store) => store.get(activeOutfitBlobKey));
     await removeActiveOutfit(previousBlob);
+  });
+}
+
+export async function loadOutfitItems(): Promise<OutfitItem[]> {
+  const value = await chrome.storage.local.get(outfitItemsKey);
+  const items = value[outfitItemsKey];
+  if (items === undefined) {
+    const activeValue = await chrome.storage.local.get(activeOutfitMetadataKey);
+    const metadata = activeValue[activeOutfitMetadataKey];
+    if (!isActiveOutfitMetadata(metadata)) return [];
+    let platform: OutfitItem["platform"] | undefined;
+    try {
+      const host = new URL(metadata.product_url).hostname.toLowerCase().replace(/^www\./, "");
+      platform = (Object.entries(platformHosts) as [OutfitItem["platform"], string][]).find(([, expected]) => host === expected)?.[0];
+    } catch { /* invalid legacy URLs are handled by active-outfit validation */ }
+    return platform ? [{ platform, title: metadata.product_title, product_type: metadata.product_type, product_url: metadata.product_url, image_url: "" }] : [];
+  }
+  if (!Array.isArray(items) || items.length > 20 || !items.every(isOutfitItem)) {
+    await chrome.storage.local.remove(outfitItemsKey);
+    return [];
+  }
+  return items.map((item) => ({ ...item }));
+}
+
+export function saveOutfitItem(input: OutfitItem): Promise<OutfitItem[]> {
+  return withProfileLock(async () => {
+    if (!isOutfitItem(input)) throw new Error("Choose a product from a supported retailer.");
+    const current = await loadOutfitItems();
+    const item = { ...input, title: input.title.trim() };
+    const next = [...current.filter((saved) => saved.product_type !== item.product_type), item].slice(-20);
+    await chrome.storage.local.set({ [outfitItemsKey]: next });
+    return next;
+  });
+}
+
+export function removeOutfitItem(productUrl: string): Promise<OutfitItem[]> {
+  return withProfileLock(async () => {
+    const next = (await loadOutfitItems()).filter((item) => item.product_url !== productUrl);
+    await chrome.storage.local.set({ [outfitItemsKey]: next });
+    return next;
   });
 }
 
@@ -305,7 +366,7 @@ export function saveYouCamConsent(): Promise<ProfileMetadata> {
 export function deleteProfile(): Promise<void> {
   return withProfileLock(async () => {
     await transaction("readwrite", (store) => store.clear());
-    await chrome.storage.local.remove([metadataKey, legacyKey, activeOutfitMetadataKey]);
+    await chrome.storage.local.remove([metadataKey, legacyKey, activeOutfitMetadataKey, outfitItemsKey]);
   });
 }
 

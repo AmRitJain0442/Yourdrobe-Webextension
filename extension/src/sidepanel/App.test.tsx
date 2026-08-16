@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { deleteActiveOutfit, deleteProfile, LocalProfileAssetMissingError, loadActiveOutfit, loadProfile, loadRequiredAssets, saveActiveOutfit, saveYouCamConsent } from "../profile/store";
+import { deleteActiveOutfit, deleteProfile, LocalProfileAssetMissingError, loadActiveOutfit, loadOutfitItems, loadProfile, loadRequiredAssets, removeOutfitItem, saveActiveOutfit, saveOutfitItem, saveYouCamConsent } from "../profile/store";
 import type { ActiveOutfit, ProfileMetadata } from "../profile/types";
 import type { ProductType, TryOnJob } from "../types";
 import { getResultImage } from "./api";
@@ -12,7 +12,10 @@ vi.mock("../profile/store", () => ({
   loadRequiredAssets: vi.fn(),
   loadLegacyImage: vi.fn().mockResolvedValue(null),
   loadActiveOutfit: vi.fn(),
+  loadOutfitItems: vi.fn(),
   saveActiveOutfit: vi.fn(),
+  saveOutfitItem: vi.fn(),
+  removeOutfitItem: vi.fn(),
   deleteActiveOutfit: vi.fn(),
   deleteProfile: vi.fn(),
   saveYouCamConsent: vi.fn(),
@@ -124,6 +127,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   globalThis.chrome = {
+    runtime: { sendMessage: vi.fn().mockResolvedValue({ added: 2, needs_attention: [], carts_opened: 1 }) },
     tabs: {
       query: vi.fn().mockResolvedValue([{ id: 1 }]),
       sendMessage: vi.fn().mockResolvedValue({ ok: true, products: [product] }),
@@ -137,8 +141,11 @@ beforeEach(() => {
   } as unknown as typeof chrome;
   vi.mocked(loadProfile).mockResolvedValue(null);
   vi.mocked(loadActiveOutfit).mockResolvedValue(null);
+  vi.mocked(loadOutfitItems).mockResolvedValue([]);
   vi.mocked(loadRequiredAssets).mockResolvedValue([]);
   vi.mocked(saveActiveOutfit).mockResolvedValue(activeDress);
+  vi.mocked(saveOutfitItem).mockImplementation(async (item) => [item]);
+  vi.mocked(removeOutfitItem).mockResolvedValue([]);
   vi.mocked(deleteActiveOutfit).mockResolvedValue();
   vi.mocked(deleteProfile).mockResolvedValue();
   vi.mocked(saveYouCamConsent).mockResolvedValue({ ...fullBodyProfile, youcam_consented_at: "2026-08-16T00:00:00.000Z" });
@@ -227,6 +234,46 @@ describe("App", () => {
     expect(host.textContent).toContain("clothing previews will start from your saved active outfit");
   });
 
+  it("adds an unsupported accessory to the outfit without requesting a failed preview", async () => {
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    vi.mocked(loadOutfitItems).mockResolvedValue([{
+      platform: "amazon_in", title: "Saved linen top", product_type: "top",
+      product_url: activeTop.metadata.product_url, image_url: "https://example.com/top.jpg",
+    }]);
+    vi.mocked(saveOutfitItem).mockImplementation(async (item) => [
+      { platform: "amazon_in", title: "Saved linen top", product_type: "top", product_url: activeTop.metadata.product_url, image_url: "https://example.com/top.jpg" },
+      item,
+    ]);
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      products: [{ ...product, title: "Canvas shoulder bag", product_type: "bag", product_url: "https://amazon.in/dp/BAG" }],
+    });
+
+    await renderApp();
+    await click("Add to outfit without preview");
+
+    expect(saveOutfitItem).toHaveBeenCalledWith(expect.objectContaining({ title: "Canvas shoulder bag", product_type: "bag" }));
+    expect(host.textContent).toContain("2 selected products");
+    expect(host.textContent).toContain("Canvas shoulder bag");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("finalizes every selected product into retailer carts", async () => {
+    const items = [
+      { platform: "amazon_in" as const, title: "Saved linen top", product_type: "top" as const, product_url: activeTop.metadata.product_url, image_url: "https://example.com/top.jpg" },
+      { platform: "amazon_in" as const, title: "Baggy jeans", product_type: "bottom" as const, product_url: "https://amazon.in/dp/JEANS", image_url: "https://example.com/jeans.jpg" },
+    ];
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    vi.mocked(loadOutfitItems).mockResolvedValue(items);
+
+    await renderApp();
+    await click("Finalize outfit and open carts");
+
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: "FINALIZE_OUTFIT", items });
+    expect(host.textContent).toContain("2 products added");
+    expect(host.textContent).toContain("retailer cart is open");
+  });
+
   it("requires all five core photos even when the product source photo exists", async () => {
     vi.mocked(loadProfile).mockResolvedValue({
       ...fullBodyProfile,
@@ -256,7 +303,7 @@ describe("App", () => {
 
   it("creates previews with the concrete required local asset", async () => {
     vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
-    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    vi.mocked(loadRequiredAssets).mockImplementation(async (roles) => roles.length ? [{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }] : []);
     (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
     const fetchMock = vi.fn((input: string | URL | Request, _init: RequestInit) => {
       const url = String(input);
@@ -445,7 +492,7 @@ describe("App", () => {
     expect(requestBody("/products/normalize").products).toHaveLength(2);
   });
 
-  it("keeps the original full-body asset for a bag when an active outfit exists", async () => {
+  it("adds a bag without sending either profile or active-outfit images to the preview backend", async () => {
     vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
     vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
     vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
@@ -453,19 +500,17 @@ describe("App", () => {
 
     await renderApp();
     expect(host.querySelector("article.active-outfit")?.textContent).toContain("Saved linen top");
-    await click("Try these products");
+    await click("Add to outfit without preview");
 
-    expect(loadRequiredAssets).toHaveBeenCalledWith(["full_body_front"]);
-    expect(requestBody("/tryons/batch").assets).toEqual([
-      { kind: "full_body_front", image_data_url: "data:image/png;base64,profile" },
-    ]);
-    expect(requestBody("/tryons/batch")).not.toHaveProperty("outfit_base_image_data_url");
+    expect(saveOutfitItem).toHaveBeenCalledWith(expect.objectContaining({ product_type: "bag" }));
+    expect(loadRequiredAssets).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("uses the active base for a top while retaining the original full-body asset for a bag", async () => {
+  it("previews clothing from the active base while leaving a mixed-in bag for selection without preview", async () => {
     vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
     vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
-    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    vi.mocked(loadRequiredAssets).mockImplementation(async (roles) => roles.length ? [{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }] : []);
     (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       products: [{ ...product, product_type: "top" }, { ...product, title: "Canvas bag", product_url: "https://amazon.in/dp/BAG", product_type: "bag" }],
@@ -473,14 +518,14 @@ describe("App", () => {
 
     await renderApp();
     expect(host.querySelector("article.active-outfit")?.textContent).toContain("Saved linen top");
+    expect(host.textContent).toContain("Add to outfit without preview");
     await click("Try these products");
 
     const batch = requestBody("/tryons/batch");
-    expect(loadRequiredAssets).toHaveBeenCalledWith(["full_body_front"]);
-    expect(batch.assets).toEqual([
-      { kind: "full_body_front", image_data_url: "data:image/png;base64,profile" },
-    ]);
+    expect(loadRequiredAssets).toHaveBeenCalledWith([]);
+    expect(batch.assets).toEqual([]);
     expect(batch.outfit_base_image_data_url).toBe("data:image/jpeg;base64,active");
+    expect(requestBody("/products/normalize").products).toHaveLength(1);
   });
 
   it.each([

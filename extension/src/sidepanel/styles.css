@@ -54,6 +54,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .active-outfit img { width: 100%; height: min(60vh, 560px); max-height: none; object-fit: contain; background: var(--surface-muted); }
 .preview-strip .product:not(.row) img { height: min(52vh, 420px); max-height: none; }
 .active-outfit h2, .active-outfit h3, .active-outfit p, .outfit-message { margin-top: 0; }
+.outfit-items { display: grid; gap: 8px; margin: 10px 0; padding: 0; list-style: none; }
+.outfit-items li { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; color: var(--text-muted); }
+.text-action { min-height: 36px; width: auto; padding: 6px 10px; background: transparent; color: var(--accent-active); }
 .error { color: var(--danger); font-weight: 700; }
 .profile-fields { display: grid; gap: 16px; }
 .profile-fields-group { min-width: 0; margin: 0; border: 0; padding: 0; }

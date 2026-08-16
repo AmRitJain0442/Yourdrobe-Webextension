@@ -11,9 +11,11 @@ import {
   deleteProfile,
   loadActiveOutfit,
   loadLegacyImage,
+  loadOutfitItems,
   loadProfile,
   loadRequiredAssets,
   saveActiveOutfit,
+  saveOutfitItem,
   saveAsset,
   saveAttributes,
   saveYouCamConsent,
@@ -110,6 +112,27 @@ async function expectFeetPreserved() {
 }
 
 describe("profile store", () => {
+  it("stores outfit products locally, replaces the same product type, and rejects a mismatched host", async () => {
+    await saveOutfitItem({ platform: "amazon_in", title: "Blue shirt", product_type: "top", product_url: "https://amazon.in/dp/TOP", image_url: "https://images.example/top.jpg" });
+    await saveOutfitItem({ platform: "amazon_in", title: "Baggy jeans", product_type: "bottom", product_url: "https://amazon.in/dp/JEANS", image_url: "https://images.example/jeans.jpg" });
+    await saveOutfitItem({ platform: "flipkart", title: "Black jeans", product_type: "bottom", product_url: "https://flipkart.com/black-jeans/p/1", image_url: "https://images.example/black.jpg" });
+
+    expect(await loadOutfitItems()).toEqual([
+      expect.objectContaining({ title: "Blue shirt", product_type: "top" }),
+      expect.objectContaining({ title: "Black jeans", product_type: "bottom" }),
+    ]);
+    await expect(saveOutfitItem({ platform: "amazon_in", title: "Fake", product_type: "bag", product_url: "https://evil.example/item", image_url: "https://evil.example/image.jpg" })).rejects.toThrow("supported retailer");
+  });
+
+  it("clears selected outfit products when the active outfit is reset", async () => {
+    await saveActiveOutfit(new Blob(["render"], { type: "image/jpeg" }), outfitInput);
+    await saveOutfitItem({ platform: "amazon_in", title: "Blue shirt", product_type: "top", product_url: "https://amazon.in/dp/TOP", image_url: "https://images.example/top.jpg" });
+
+    await deleteActiveOutfit();
+
+    expect(await loadOutfitItems()).toEqual([]);
+  });
+
   it("saves and loads one active outfit without persisting a provider URL", async () => {
     const providerResult = { ...outfitInput, result_url: "https://provider.example/render.jpg" };
     const saved = await saveActiveOutfit(new Blob(["render"], { type: "image/jpeg" }), providerResult);
@@ -520,7 +543,7 @@ describe("profile store", () => {
     expect(await rawAsset("feet_front")).toBeUndefined();
     expect(await rawAsset("active_outfit")).toBeUndefined();
     expect(chrome.storage.local.remove).toHaveBeenCalledOnce();
-    expect(chrome.storage.local.remove).toHaveBeenCalledWith(["yourdrobe_profile_v2", "yourdrobe_profile_image", "yourdrobe_active_outfit_v1"]);
+    expect(chrome.storage.local.remove).toHaveBeenCalledWith(["yourdrobe_profile_v2", "yourdrobe_profile_image", "yourdrobe_active_outfit_v1", "yourdrobe_outfit_items_v1"]);
   });
 
   it("deletes the legacy image through its explicit path", async () => {

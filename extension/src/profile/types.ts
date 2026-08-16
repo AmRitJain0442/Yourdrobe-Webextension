@@ -1,4 +1,4 @@
-import type { ProductType } from "../types";
+import type { Product, ProductType } from "../types";
 
 export type PhotoRole =
   | "face_front" | "face_left" | "face_right"
@@ -76,3 +76,7 @@ export type ActiveOutfit = {
 export type ActiveOutfitInput = Pick<ActiveOutfitMetadata,
   "job_id" | "product_id" | "product_title" | "product_type" | "product_url"
 >;
+
+export type OutfitItem = Pick<Product, "platform" | "title" | "product_url" | "image_url"> & {
+  product_type: ProductType;
+};
