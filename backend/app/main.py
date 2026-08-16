@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Response
-from pydantic import BaseModel, Field, StrictBool
+from pydantic import BaseModel, Field, StrictBool, field_validator
 
 from app.youcam import ProviderTaskState, YouCamClient, YouCamFailure
 
@@ -41,7 +41,7 @@ class ProfileAttributesInput(BaseModel):
 
 class ProfileInput(BaseModel):
     session_id: str
-    assets: list[ProfileAssetInput] = Field(min_length=1, max_length=11)
+    assets: list[ProfileAssetInput] = Field(default_factory=list, max_length=11)
     attributes: ProfileAttributesInput = Field(default_factory=ProfileAttributesInput)
     consent: bool
 
@@ -73,6 +73,14 @@ class BatchInput(BaseModel):
     product_ids: list[str] = Field(min_length=1, max_length=5)
     assets: list[ProfileAssetInput] = Field(default_factory=list, max_length=11)
     cloud_consent: StrictBool = False
+    outfit_base_image_data_url: str | None = Field(default=None, max_length=14_000_000)
+
+    @field_validator("outfit_base_image_data_url")
+    @classmethod
+    def validate_outfit_base_image(cls, value: str | None) -> str | None:
+        if value is not None and not value.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")):
+            raise ValueError("Active outfit must be a JPEG or PNG data URL")
+        return value
 
 
 app = FastAPI(title="Yourdrobe Demo API")
@@ -196,6 +204,12 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
     profile_roles = profiles[body.profile_id]
     for product in resolved_products:
         for alternatives in PRODUCT_REQUIREMENTS.get(product["product_type"], ()):
+            if (
+                body.outfit_base_image_data_url
+                and product["product_type"] in LIVE_MAPPING
+                and "full_body_front" in alternatives
+            ):
+                continue
             if not any(role in profile_roles for role in alternatives):
                 missing.add(
                     "hand_wrist"
@@ -225,7 +239,11 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
     asset_by_role = {asset.kind: asset.image_data_url for asset in body.assets}
     missing = {
         mapping[0] for product in resolved_products
-        if (mapping := LIVE_MAPPING.get(product["product_type"])) and mapping[0] not in asset_by_role
+        if (
+            (mapping := LIVE_MAPPING.get(product["product_type"]))
+            and not body.outfit_base_image_data_url
+            and mapping[0] not in asset_by_role
+        )
     }
     if missing:
         raise HTTPException(422, {"code": "missing_profile_assets", "roles": sorted(missing)})
@@ -244,7 +262,8 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
             }
         else:
             try:
-                started = youcam.create_clothes_task(asset_by_role[mapping[0]], product["image_url"], mapping[1])
+                source = body.outfit_base_image_data_url or asset_by_role[mapping[0]]
+                started = youcam.create_clothes_task(source, product["image_url"], mapping[1])
             except YouCamFailure as failure:
                 job = {
                     "job_id": job_id,

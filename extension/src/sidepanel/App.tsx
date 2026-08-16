@@ -108,7 +108,7 @@ export function App() {
         rolesForRequirement(requirement).find((role) => available.has(role)) ?? rolesForRequirement(requirement)[0],
       );
       const assets = await loadRequiredAssets(roles);
-      const started = await startDemo(assets, currentProfile?.attributes ?? {}, selectedProducts, Boolean(currentProfile?.youcam_consented_at), request.signal);
+      const started = await startDemo(assets, currentProfile?.attributes ?? {}, selectedProducts, Boolean(currentProfile?.youcam_consented_at), undefined, request.signal);
       if (request.signal.aborted) return;
       pollDeadline = new AbortController();
       pollDeadlineTimer = setTimeout(

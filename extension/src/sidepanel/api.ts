@@ -65,6 +65,7 @@ export async function startDemo(
   attributes: ProfileAttributes,
   products: Product[],
   cloudConsent: boolean,
+  outfitBaseImageDataUrl?: string,
   signal?: AbortSignal,
 ) {
   const session = await json<{ session_id: string }>("/sessions", { method: "POST", body: "{}", signal });
@@ -87,6 +88,7 @@ export async function startDemo(
       product_ids: normalized.products.map((product) => product.id),
       assets,
       cloud_consent: cloudConsent,
+      outfit_base_image_data_url: outfitBaseImageDataUrl,
     }),
   }, batchTimeoutMs);
   return { products: normalized.products, jobs: batch.jobs };

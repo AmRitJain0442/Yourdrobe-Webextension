@@ -197,6 +197,63 @@ class ApiJourneyTest(unittest.TestCase):
             self.assertEqual(provider.created[-1][0], source)
             self.assertEqual(provider.created[-1][2], garment)
 
+    def test_active_outfit_is_the_shared_source_for_a_mixed_live_batch(self) -> None:
+        provider = FakeYouCam()
+        main.youcam = provider
+        top_id = self.create_product("unused", "top")
+        bottom_id = self.create_product("unused", "bottom")
+        body = self.live_batch(top_id)
+        body["product_ids"] = [top_id, bottom_id]
+        body["outfit_base_image_data_url"] = "data:image/jpeg;base64,b3V0Zml0"
+        response = self.client.post("/v1/tryons/batch", json=body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([call[0] for call in provider.created], [
+            "data:image/jpeg;base64,b3V0Zml0",
+            "data:image/jpeg;base64,b3V0Zml0",
+        ])
+        self.assertEqual([call[2] for call in provider.created], ["upper_body", "lower_body"])
+
+    def test_active_outfit_satisfies_live_source_with_an_empty_profile(self) -> None:
+        main.youcam = FakeYouCam()
+        session_id = self.client.post("/v1/sessions", json={}).json()["session_id"]
+        profile_id = self.create_profile(session_id, ())
+        product_id = self.create_product("unused", "dress")
+        response = self.client.post("/v1/tryons/batch", json={
+            "session_id": session_id,
+            "profile_id": profile_id,
+            "product_ids": [product_id],
+            "assets": [],
+            "cloud_consent": True,
+            "outfit_base_image_data_url": "data:image/png;base64,b3V0Zml0",
+        })
+        self.assertEqual(response.status_code, 200)
+
+    def test_active_outfit_does_not_satisfy_non_clothing_requirements(self) -> None:
+        main.youcam = FakeYouCam()
+        session_id = self.client.post("/v1/sessions", json={}).json()["session_id"]
+        profile_id = self.create_profile(session_id, ())
+        product_id = self.create_product("unused", "makeup")
+        response = self.client.post("/v1/tryons/batch", json={
+            "session_id": session_id,
+            "profile_id": profile_id,
+            "product_ids": [product_id],
+            "cloud_consent": True,
+            "outfit_base_image_data_url": "data:image/jpeg;base64,b3V0Zml0",
+        })
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"], {
+            "code": "missing_profile_assets", "roles": ["face_front"],
+        })
+
+    def test_live_batch_rejects_invalid_active_outfit_data(self) -> None:
+        main.youcam = FakeYouCam()
+        product_id = self.create_product("unused", "dress")
+        for value in ("data:text/plain;base64,b3V0Zml0", "x" * 14_000_001):
+            body = self.live_batch(product_id)
+            body["outfit_base_image_data_url"] = value
+            with self.subTest(value=value[:30]):
+                self.assertEqual(self.client.post("/v1/tryons/batch", json=body).status_code, 422)
+
     def test_live_batch_requires_cloud_consent(self) -> None:
         main.youcam = FakeYouCam()
         product_id = self.create_product("unused", "dress")
