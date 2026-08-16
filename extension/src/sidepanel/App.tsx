@@ -445,8 +445,8 @@ export function App() {
   const visibleProducts = products.slice(productPage * productPageSize, (productPage + 1) * productPageSize);
 
   return <main>
-    <header><span className="eyebrow">Yourdrobe</span><h1>Your fitting room, anywhere.</h1></header>
-    {phase === "loading" && <p role="status">Reading products from this page...</p>}
+    <header className="app-header"><div className="brand-mark" aria-hidden="true">Y</div><div><span className="eyebrow">Yourdrobe</span><h1>Your fitting room, anywhere.</h1></div><span className="header-sparkle" aria-hidden="true">✦</span></header>
+    {phase === "loading" && <section className="loading-state" aria-live="polite"><span aria-hidden="true">✦</span><p role="status">Reading products from this page...</p></section>}
     {(phase === "ready" || phase === "results") && activeOutfit && <ActiveOutfitPanel outfit={activeOutfit} outfits={outfitVersions} items={outfitItems} busy={outfitBusy || finalizeBusy} onSelect={(index) => void chooseOutfitVersion(index)} onRemove={(url) => void removeSelectedProduct(url)} onFinalize={() => void finalizeOutfit()} onReset={() => void resetActiveOutfit()} />}
     {(phase === "ready" || phase === "results") && outfitStatus && <p className="outfit-message" role="status">{outfitStatus}</p>}
     {(phase === "ready" || phase === "results") && outfitError && <p className="error outfit-message" role="alert">{outfitError}</p>}
@@ -457,13 +457,13 @@ export function App() {
     )} onSaved={() => void reloadProfile().then(() => setPhase("ready"))} onCancel={() => setPhase("ready")} />}
     {phase === "profile-manager" && <ProfileManager profile={profile} legacyImage={legacyImage} onChanged={reloadProfile} onClose={() => setPhase(products.length ? "ready" : "empty")} />}
     {phase === "youcam-consent" && <div className="youcam-consent"><YouCamConsent busy={consentBusy} error={consentError} onAccept={() => void acceptYouCamConsent()} onCancel={() => setPhase("ready")} /></div>}
-    {phase === "ready" && <section>
-      <h2>{products.length} products ready</h2>
-      <div className="list preview-strip product-page">{visibleProducts.map((product, index) => <div key={product.product_url}><ProductRow product={product} />
+    {phase === "ready" && <section className="catalog-section">
+      <div className="section-heading"><div><span className="eyebrow">Shop this page</span><h2>{products.length} products ready</h2></div><span className="result-count">{productPage * productPageSize + 1}–{Math.min((productPage + 1) * productPageSize, products.length)}</span></div>
+      <div className="list product-page">{visibleProducts.map((product, index) => <div className="catalog-item" key={product.product_url}><ProductRow product={product} />
         {(!product.product_type || product.product_type === "unknown") && <label>Choose product type for {product.title}<select required value={product.product_type ?? "unknown"} onChange={(event) => setProducts((current) => current.map((item, itemIndex) => itemIndex === productPage * productPageSize + index ? { ...item, product_type: event.target.value as ProductType } : item))}><option value="unknown">Choose product type</option>{selectableProductTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
         {activeOutfit && product.product_type && product.product_type !== "unknown" && !activeOutfitProductTypes.has(product.product_type) && <button className="secondary" disabled={outfitBusy} onClick={() => void addWithoutPreview(product)}>Add to outfit without preview</button>}
         {product.product_type === "footwear" && <label>Shoe preview model<select aria-label="Shoe preview model" value={shoeGenders[product.product_url] ?? ""} onChange={(event) => setShoeGenders((current) => ({ ...current, [product.product_url]: event.target.value as ShoeGender }))}><option value="">Choose Women or Men</option><option value="female">Women</option><option value="male">Men</option></select></label>}
-        {product.product_type && product.product_type !== "unknown" && activeOutfitProductTypes.has(product.product_type) && <button disabled={outfitBusy || (product.product_type === "footwear" && !shoeGenders[product.product_url])} onClick={() => previewProduct(product)}>{product.product_type === "footwear" ? "Try these shoes" : `Try this ${product.product_type}`}</button>}
+        {product.product_type && product.product_type !== "unknown" && activeOutfitProductTypes.has(product.product_type) && <button className="ai-button" disabled={outfitBusy || (product.product_type === "footwear" && !shoeGenders[product.product_url])} onClick={() => previewProduct(product)}>{product.product_type === "footwear" ? "Try these shoes" : `Try this ${product.product_type}`}</button>}
         {!activeOutfit && product.product_type && product.product_type !== "unknown" && !activeOutfitProductTypes.has(product.product_type) && <p className="preview-unavailable">AI preview is not available for {product.product_type} with the current provider.</p>}
       </div>)}</div>
       {productPageCount > 1 && <nav className="product-pagination" aria-label="Product pages">
@@ -475,8 +475,8 @@ export function App() {
     </section>}
     {phase === "running" && <p role="status">Creating your previews...</p>}
     {phase === "empty" && <section><h2>No products found on this page.</h2><p>Browse a product listing or search results on this supported site, then retry.</p><button onClick={() => location.reload()}>Retry</button></section>}
-    {phase === "results" && <section>
-      <h2>Your previews</h2>
+    {phase === "results" && <section className="results-section">
+      <div className="section-heading"><div><span className="eyebrow">AI fitting room</span><h2>Your previews</h2></div><span aria-hidden="true">✦</span></div>
       <div className="list preview-strip">{results.map(({ product, job }) => {
         const failed = job.status === "failed" || (job.mock === false && !isHttpsUrl(job.result_url));
         return <article className="product" key={job.job_id}>
@@ -484,7 +484,7 @@ export function App() {
           {failed
             ? <p className="error">{job.error_message ?? "This product preview failed. You can still view the original listing."}</p>
             : <img src={job.result_url || product.image_url} alt={`Preview of ${product.title}`} />}
-          {job.status === "completed" && job.mock === false && isHttpsUrl(job.result_url) && <button disabled={outfitBusy} onClick={() => void useAsActiveOutfit({ product, job })}>Add this to active outfit</button>}
+          {job.status === "completed" && job.mock === false && isHttpsUrl(job.result_url) && <button className="ai-button" disabled={outfitBusy} onClick={() => void useAsActiveOutfit({ product, job })}>Add this to active outfit</button>}
           <a className="button secondary" href={product.product_url} target="_blank" rel="noreferrer">View original product</a>
         </article>;
       })}</div>
@@ -492,12 +492,11 @@ export function App() {
     </section>}
     {phase === "error" && <section><p className="error" role="alert">{error}</p><button onClick={() => location.reload()}>Retry</button></section>}
     {(["ready", "results", "empty", "error"] as Phase[]).includes(phase) && <section className="product-search" aria-labelledby="product-search-heading">
-      <h2 id="product-search-heading">Find your next piece</h2>
-      <p>Search a supported store and see its top-ranked results here.</p>
+      <div className="section-heading"><div><span className="eyebrow">Discover</span><h2 id="product-search-heading">Find your next piece</h2></div><span aria-hidden="true">✦</span></div>
       <form onSubmit={(event) => void searchProducts(event)}>
-        <label>What are you looking for?<input type="search" required minLength={2} maxLength={100} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Baggy jeans" /></label>
+        <label>What are you looking for?<input type="search" required minLength={2} maxLength={100} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search or describe what you want..." /></label>
         <label>Store<select aria-label="Marketplace" value={searchStore} onChange={(event) => setSearchStore(event.target.value as SearchStore)}>{searchStores.map((store) => <option key={store.value} value={store.value}>{store.label}</option>)}</select></label>
-        <button disabled={searchBusy}>{searchBusy ? "Searching..." : "Search"}</button>
+        <button className="search-button" disabled={searchBusy}>{searchBusy ? "Searching..." : "Search"}</button>
       </form>
       {searchError && <p className="error" role="alert">{searchError}</p>}
     </section>}
@@ -508,7 +507,7 @@ function ActiveOutfitPanel({ outfit, outfits, items, busy, onSelect, onRemove, o
   const displayed = items.length ? items : [{ title: outfit.metadata.product_title, product_type: outfit.metadata.product_type, product_url: outfit.metadata.product_url }];
   const activeIndex = outfits.findIndex((saved) => saved.metadata.job_id === outfit.metadata.job_id);
   return <article className="product active-outfit" aria-labelledby="active-outfit-heading">
-    <h2 id="active-outfit-heading">Active outfit</h2>
+    <div className="section-heading"><div><span className="eyebrow">Your current look</span><h2 id="active-outfit-heading">Active outfit</h2></div><span className="badge">✦ AI look</span></div>
     <img src={outfit.image_data_url} alt={`Active outfit: ${outfit.metadata.product_title}`} />
     {outfits.length > 0 && <div className="outfit-comparison"><h3>Compare saved outfits</h3><p>Select the version you want to continue building or finalize.</p><CardFanCarousel cards={outfits.map((saved) => ({ id: saved.metadata.job_id, imgUrl: saved.image_data_url, alt: `Saved outfit ending with ${saved.metadata.product_title}` }))} activeIndex={activeIndex} onSelect={onSelect} /></div>}
     <div><h3>{displayed.length} selected {displayed.length === 1 ? "product" : "products"}</h3><ul className="outfit-items">{displayed.map((item) => <li key={item.product_url}><span>{item.title} · {item.product_type}</span>{items.length > 0 && !activeOutfitProductTypes.has(item.product_type) && <button className="text-action" disabled={busy} aria-label={`Remove ${item.title}`} onClick={() => onRemove(item.product_url)}>Remove</button>}</li>)}</ul></div>
@@ -524,5 +523,5 @@ function ProductRow({ product }: { product: Product }) {
   const price = product.price && product.currency
     ? new Intl.NumberFormat(product.currency === "INR" ? "en-IN" : "en-US", { style: "currency", currency: product.currency }).format(product.price)
     : "Price unavailable";
-  return <article className="product row"><img src={product.image_url} alt="" /><div><h3>{product.title}</h3><p>{price}</p><a href={product.product_url} target="_blank" rel="noreferrer">View listing</a></div></article>;
+  return <article className="product catalog-card"><img src={product.image_url} alt={product.title} /><div><h3>{product.title}</h3><p className="price">{price}</p><a href={product.product_url} target="_blank" rel="noreferrer">View product</a></div></article>;
 }

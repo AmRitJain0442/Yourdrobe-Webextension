@@ -5,6 +5,14 @@ import { describe, expect, it } from "vitest";
 const css = readFileSync(resolve("src/sidepanel/styles.css"), "utf8");
 
 describe("side panel button contrast", () => {
+  it("uses the supplied extension design tokens and image-first catalog grid", () => {
+    expect(css).toContain("--color-primary: #f43f7a");
+    expect(css).toContain("--gradient-ai: linear-gradient(135deg, #f43f7a 0%, #ff5d9a 55%, #7c5cfa 100%)");
+    expect(css).toMatch(/font-family:\s*Poppins,/);
+    expect(css).toMatch(/\.product-page\s*{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(2,/);
+    expect(css).toMatch(/\.catalog-card img\s*{[^}]*aspect-ratio:\s*4\s*\/\s*5;/);
+  });
+
   it("defines contrasting secondary hover colors in light and dark schemes", () => {
     expect(css).toMatch(/\.secondary:hover\s*{[^}]*background:[^;]+;[^}]*color:[^;]+;/);
     const dark = css.slice(css.indexOf("@media (prefers-color-scheme: dark)"));
