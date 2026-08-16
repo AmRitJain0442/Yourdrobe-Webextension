@@ -14,7 +14,7 @@ export type Product = {
   product_type?: ProductType;
   image_url: string;
   product_url: string;
-  metadata: { shade?: string; color?: string };
+  metadata: { shade?: string; color?: string; gender?: "female" | "male" };
 };
 
 export type TryOnJob = {

@@ -277,6 +277,29 @@ describe("App", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("offers a shoe preview that continues from the active outfit", async () => {
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      products: [{ ...product, title: "White trainers", product_type: "footwear", product_url: "https://amazon.in/dp/SHOES" }],
+    });
+
+    await renderApp();
+    const gender = host.querySelector('select[aria-label="Shoe preview model"]') as HTMLSelectElement;
+    expect(gender).not.toBeNull();
+    await act(async () => {
+      gender.value = "female";
+      gender.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await click("Try these shoes");
+
+    expect(requestBody("/products/normalize").products).toEqual([
+      expect.objectContaining({ title: "White trainers", product_type: "footwear", metadata: expect.objectContaining({ gender: "female" }) }),
+    ]);
+    expect(requestBody("/tryons/batch").outfit_base_image_data_url).toBe("data:image/jpeg;base64,active");
+  });
+
   it("finalizes every selected product into retailer carts", async () => {
     const items = [
       { platform: "amazon_in" as const, title: "Saved linen top", product_type: "top" as const, product_url: activeTop.metadata.product_url, image_url: "https://example.com/top.jpg" },

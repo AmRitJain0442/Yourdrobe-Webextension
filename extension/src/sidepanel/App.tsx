@@ -25,7 +25,8 @@ const selectableProductTypes: ProductType[] = [
   "makeup", "eyewear", "headwear", "earrings", "necklace", "top", "outerwear",
   "dress", "bottom", "belt", "bag", "watch", "bracelet", "ring", "footwear",
 ];
-const activeOutfitProductTypes = new Set<ProductType>(["top", "outerwear", "bottom", "dress"]);
+const activeOutfitProductTypes = new Set<ProductType>(["top", "outerwear", "bottom", "dress", "footwear"]);
+type ShoeGender = "" | "female" | "male";
 type SearchStore = Product["platform"];
 const searchStores: { value: SearchStore; label: string; url: (query: string) => string }[] = [
   { value: "amazon_in", label: "Amazon India", url: (query) => `https://www.amazon.in/s?k=${query}` },
@@ -81,6 +82,7 @@ export function App() {
   const [finalizeBusy, setFinalizeBusy] = useState(false);
   const [finalizeStatus, setFinalizeStatus] = useState("");
   const [finalizeError, setFinalizeError] = useState("");
+  const [shoeGenders, setShoeGenders] = useState<Record<string, ShoeGender>>({});
   const activeRequest = useRef<AbortController | null>(null);
   const pendingProducts = useRef<Product[]>([]);
   const outfitMutation = useRef(false);
@@ -358,6 +360,16 @@ export function App() {
     }
   }
 
+  function previewProduct(product: Product) {
+    let selected = product;
+    if (product.product_type === "footwear") {
+      const gender = shoeGenders[product.product_url];
+      if (!gender) return;
+      selected = { ...product, metadata: { ...product.metadata, gender } };
+    }
+    void runDemo(profile, [selected]);
+  }
+
   async function removeSelectedProduct(productUrl: string) {
     if (outfitMutation.current || finalizeBusy) return;
     outfitMutation.current = true;
@@ -414,7 +426,8 @@ export function App() {
       <div className="list preview-strip">{products.map((product, index) => <div key={product.product_url}><ProductRow product={product} />
         {(!product.product_type || product.product_type === "unknown") && <label>Choose product type for {product.title}<select required value={product.product_type ?? "unknown"} onChange={(event) => setProducts((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, product_type: event.target.value as ProductType } : item))}><option value="unknown">Choose product type</option>{selectableProductTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
         {activeOutfit && product.product_type && product.product_type !== "unknown" && !activeOutfitProductTypes.has(product.product_type) && <button className="secondary" disabled={outfitBusy} onClick={() => void addWithoutPreview(product)}>Add to outfit without preview</button>}
-        {product.product_type && product.product_type !== "unknown" && activeOutfitProductTypes.has(product.product_type) && <button disabled={outfitBusy} onClick={() => void runDemo(profile, [product])}>Try this {product.product_type}</button>}
+        {product.product_type === "footwear" && <label>Shoe preview model<select aria-label="Shoe preview model" value={shoeGenders[product.product_url] ?? ""} onChange={(event) => setShoeGenders((current) => ({ ...current, [product.product_url]: event.target.value as ShoeGender }))}><option value="">Choose Women or Men</option><option value="female">Women</option><option value="male">Men</option></select></label>}
+        {product.product_type && product.product_type !== "unknown" && activeOutfitProductTypes.has(product.product_type) && <button disabled={outfitBusy || (product.product_type === "footwear" && !shoeGenders[product.product_url])} onClick={() => previewProduct(product)}>{product.product_type === "footwear" ? "Try these shoes" : `Try this ${product.product_type}`}</button>}
         {!activeOutfit && product.product_type && product.product_type !== "unknown" && !activeOutfitProductTypes.has(product.product_type) && <p className="preview-unavailable">AI preview is not available for {product.product_type} with the current provider.</p>}
       </div>)}</div>
       <button className="secondary" disabled={outfitBusy} onClick={openProfileManager}>Manage profile</button>
