@@ -13,10 +13,9 @@ describe("side panel button contrast", () => {
     expect(css).toMatch(/\.catalog-card img\s*{[^}]*aspect-ratio:\s*4\s*\/\s*5;/);
   });
 
-  it("defines contrasting secondary hover colors in light and dark schemes", () => {
+  it("keeps the supplied light theme regardless of system appearance", () => {
     expect(css).toMatch(/\.secondary:hover\s*{[^}]*background:[^;]+;[^}]*color:[^;]+;/);
-    const dark = css.slice(css.indexOf("@media (prefers-color-scheme: dark)"));
-    expect(dark).toMatch(/\.secondary:hover\s*{[^}]*background:[^;]+;[^}]*color:[^;]+;/);
+    expect(css).not.toContain("prefers-color-scheme: dark");
   });
 
   it("preserves the danger hover foreground and background pairing", () => {

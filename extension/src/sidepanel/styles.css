@@ -227,13 +227,4 @@ legend { padding: 0 4px; font-weight: 600; }
   .product-search form label:first-child { grid-column: auto; }
   .product-search .search-button { margin-bottom: 0; }
 }
-@media (prefers-color-scheme: dark) {
-  :root { color: #f9f5f7; background: #1f191d; --color-background: #1f191d; --color-surface: #2a2227; --color-text-primary: #f9f5f7; --color-text-secondary: #c9bec5; --color-border: #4a3d45; --surface: #2a2227; --surface-muted: #211b1f; --text: #f9f5f7; --text-muted: #c9bec5; --border: #4a3d45; --accent-soft: #4a2937; }
-  .app-header { background: rgb(42 34 39 / 90%); }
-  section, .active-outfit, .catalog-item { background: rgb(42 34 39 / 96%); }
-  .product-search { background: linear-gradient(150deg, #2a2227 55%, #3a2430); }
-  .secondary { background: transparent; color: #ff9cbb; }
-  .secondary:hover { background: #4a2937; color: #ffd4e1; }
-  .catalog-card img, .active-outfit img { background: #211b1f; }
-}
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
