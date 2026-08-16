@@ -2,6 +2,7 @@
 my-product-sa-key.json
 *-service-account*.json
 *-sa-key.json
+gen-lang-client-*.json
 .env
 .env.*
 !.env.example
