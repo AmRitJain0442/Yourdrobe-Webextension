@@ -2,12 +2,12 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepareProfileImage } from "../profile/image";
-import { assignLegacyImage, deleteAsset, deleteProfile, saveAsset, saveAttributes } from "../profile/store";
+import { assignLegacyImage, deleteAsset, deleteProfile, saveAsset } from "../profile/store";
 import type { ProfileMetadata } from "../profile/types";
 import { ProfileManager } from "./ProfileManager";
 
 vi.mock("../profile/store", () => ({
-  assignLegacyImage: vi.fn(), deleteAsset: vi.fn(), deleteLegacyImage: vi.fn(), deleteProfile: vi.fn(), saveAsset: vi.fn(), saveAttributes: vi.fn(),
+  assignLegacyImage: vi.fn(), deleteAsset: vi.fn(), deleteLegacyImage: vi.fn(), deleteProfile: vi.fn(), saveAsset: vi.fn(),
 }));
 vi.mock("../profile/image", () => ({ prepareProfileImage: vi.fn() }));
 
@@ -46,7 +46,6 @@ beforeEach(() => {
     metadata: { role, mime_type: "image/jpeg", width: 800, height: 800, byte_size: 1, updated_at: "2026-08-15T00:00:00.000Z" },
   }));
   vi.mocked(saveAsset).mockResolvedValue(profile);
-  vi.mocked(saveAttributes).mockResolvedValue(profile);
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -55,30 +54,42 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe("ProfileManager", () => {
-  it("shows existing and legacy photos with category completion", async () => {
+  it("manages only the five required photos without measurement fields", async () => {
+    await renderManager();
+
+    expect(host.querySelectorAll(".profile-asset:not(.legacy-image)")).toHaveLength(5);
+    expect(host.textContent).toContain("Front face photo");
+    expect(host.textContent).toContain("Left face photo");
+    expect(host.textContent).toContain("Right face photo");
+    expect(host.textContent).toContain("Front full-body photo");
+    expect(host.textContent).toContain("Side full-body photo");
+    expect(host.textContent).not.toContain("Optional attributes");
+    expect(host.querySelector('input[name="height_cm"]')).toBeNull();
+  });
+
+  it("shows existing and legacy photos with profile completion", async () => {
     await renderManager();
     expect(host.textContent).toContain("Front face photo");
     expect(host.textContent).toContain("Unclassified existing photo");
-    expect(host.textContent).toContain("Makeup and face accessoriesComplete");
-    expect(host.textContent).toContain("FootwearPhoto needed");
+    expect(host.textContent).toContain("1 of 5 required photos saved");
   });
 
   it("uploads a missing photo directly from profile management", async () => {
     const { onChanged } = await renderManager(vi.fn(), vi.fn(), profile, null);
-    const upperBody = [...host.querySelectorAll<HTMLElement>(".profile-asset")]
-      .find((asset) => asset.textContent?.includes("Front upper-body photo"));
-    const input = upperBody?.querySelector('input[type="file"]') as HTMLInputElement | null;
+    const leftFace = [...host.querySelectorAll<HTMLElement>(".profile-asset")]
+      .find((asset) => asset.textContent?.includes("Left face photo"));
+    const input = leftFace?.querySelector('input[type="file"]') as HTMLInputElement | null;
 
-    expect(upperBody).toBeDefined();
-    expect(upperBody!.textContent).toContain("Add photo");
+    expect(leftFace).toBeDefined();
+    expect(leftFace!.textContent).toContain("Add photo");
     expect(input).not.toBeNull();
 
     await act(async () => {
-      choose(input!, new File(["upper"], "upper.jpg", { type: "image/jpeg" }));
+      choose(input!, new File(["left"], "left.jpg", { type: "image/jpeg" }));
       await Promise.resolve();
     });
 
-    expect(prepareProfileImage).toHaveBeenCalledWith(input?.files?.[0], "upper_body_front");
+    expect(prepareProfileImage).toHaveBeenCalledWith(input?.files?.[0], "face_left");
     expect(saveAsset).toHaveBeenCalledOnce();
     expect(onChanged).toHaveBeenCalledOnce();
   });
@@ -104,13 +115,13 @@ describe("ProfileManager", () => {
     expect(host.textContent).toContain("browser-local profile storage and per-run transmission");
     expect(host.textContent).toContain("127.0.0.1:8001");
     const select = host.querySelector("select") as HTMLSelectElement;
-    await act(async () => { select.value = "upper_body_front"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    await act(async () => { select.value = "full_body_side"; select.dispatchEvent(new Event("change", { bubbles: true })); });
     await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Assign photo")?.click(); });
     expect(assignLegacyImage).not.toHaveBeenCalled();
     expect(host.querySelector('[role="alert"]')?.textContent).toBe("Agree to browser-local storage and per-run transmission before assigning this photo.");
     await act(async () => { (host.querySelector('input[type="checkbox"]') as HTMLInputElement).click(); });
     await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Assign photo")?.click(); });
-    expect(assignLegacyImage).toHaveBeenCalledWith("upper_body_front");
+    expect(assignLegacyImage).toHaveBeenCalledWith("full_body_side");
     expect(onChanged).toHaveBeenCalled();
   });
 
@@ -158,42 +169,9 @@ describe("ProfileManager", () => {
 
   it("deletes the complete profile after confirmation", async () => {
     const { onChanged, onClose } = await renderManager();
-    const height = [...host.querySelectorAll("input")].find((input) => input.getAttribute("name") === "height_cm") as HTMLInputElement;
-    expect(height.value).toBe("165");
     await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Delete complete profile")?.click(); });
     expect(deleteProfile).toHaveBeenCalledOnce();
     expect(onChanged).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
-    expect(height.value).toBe("");
-  });
-
-  it("saves numeric centimetre attributes from string inputs", async () => {
-    await renderManager();
-    const height = [...host.querySelectorAll("input")].find((input) => input.getAttribute("name") === "height_cm") as HTMLInputElement;
-    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(height, "170"); height.dispatchEvent(new Event("input", { bubbles: true })); });
-    expect(height.validity.valid).toBe(true);
-    expect((host.querySelector("form") as HTMLFormElement).checkValidity()).toBe(true);
-    await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Save attributes")?.click(); });
-    expect(saveAttributes).toHaveBeenCalledWith(expect.objectContaining({ height_cm: 170 }));
-  });
-
-  it("requires consent before creating an attribute-only profile", async () => {
-    const { onChanged } = await renderManager(vi.fn(), vi.fn(), null);
-    const height = host.querySelector('input[name="height_cm"]') as HTMLInputElement;
-    const consentInputs = host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
-    expect(consentInputs).toHaveLength(1);
-    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(height, "170"); height.dispatchEvent(new Event("input", { bubbles: true })); });
-
-    await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Save attributes")?.click(); });
-
-    expect(saveAttributes).not.toHaveBeenCalled();
-    expect(host.querySelector('[role="alert"]')?.textContent).toBe("Agree to browser-local storage and per-run transmission before saving attributes.");
-    expect(host.textContent).toContain("per-run transmission of required photos and optional attributes to 127.0.0.1:8001");
-
-    await act(async () => { consentInputs[0].click(); });
-    await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Save attributes")?.click(); });
-
-    expect(saveAttributes).toHaveBeenCalledWith(expect.objectContaining({ height_cm: 170 }));
-    expect(onChanged).toHaveBeenCalledOnce();
   });
 });

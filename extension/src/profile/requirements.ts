@@ -8,9 +8,11 @@ const requirements: Partial<Record<ProductType, RequirementKey>> = {
   watch: "full_body_front", bracelet: "full_body_front", ring: "full_body_front", footwear: "full_body_front",
 };
 
-export const profilePhotoRoles: readonly PhotoRole[] = [
+export const profilePhotoRoles = [
   "face_front", "face_left", "face_right", "full_body_front", "full_body_side",
-];
+] as const satisfies readonly PhotoRole[];
+
+export type ProfilePhotoRole = (typeof profilePhotoRoles)[number];
 
 const alternatives: Record<RequirementKey, readonly PhotoRole[]> = {
   face_front: ["face_front"],

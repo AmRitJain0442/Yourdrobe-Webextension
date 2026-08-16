@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ExtractProductsResponse, Product, ProductType, TryOnJob } from "../types";
-import { missingRequirements, requirementsForProducts, rolesForRequirement } from "../profile/requirements";
+import { missingRequirements, profilePhotoRoles, requirementsForProducts, rolesForRequirement } from "../profile/requirements";
 import { deleteActiveOutfit, LocalProfileAssetMissingError, loadActiveOutfit, loadLegacyImage, loadProfile, loadRequiredAssets, saveActiveOutfit, saveYouCamConsent } from "../profile/store";
 import type { ActiveOutfit, PhotoRole, ProfileMetadata, RequirementKey } from "../profile/types";
 import { getCapabilities, getJob, getResultImage, MissingProfileAssetsError, startDemo, type NormalizedProduct } from "./api";
@@ -93,6 +93,12 @@ export function App() {
 
   async function runDemo(currentProfile = profile) {
     if (outfitMutation.current) return;
+    const savedRoles = new Set(Object.keys(currentProfile?.assets ?? {}) as PhotoRole[]);
+    if (profilePhotoRoles.some((role) => !savedRoles.has(role))) {
+      setMissing([]);
+      setPhase("profile-setup");
+      return;
+    }
     const selectedProducts = products.slice(0, 5);
     const outfitBaseImageDataUrl = activeOutfit && selectedProducts.some((product) => activeOutfitProductTypes.has(product.product_type ?? "unknown"))
       ? activeOutfit.image_data_url
@@ -260,7 +266,9 @@ export function App() {
     {(phase === "ready" || phase === "results") && activeOutfit && <ActiveOutfitPanel outfit={activeOutfit} busy={outfitBusy} onReset={() => void resetActiveOutfit()} />}
     {(phase === "ready" || phase === "results") && outfitStatus && <p className="outfit-message" role="status">{outfitStatus}</p>}
     {(phase === "ready" || phase === "results") && outfitError && <p className="error outfit-message" role="alert">{outfitError}</p>}
-    {phase === "profile-setup" && <ProfileSetup requirements={missing} productTypes={products.map((product) => product.product_type ?? "unknown")} onSaved={() => void reloadProfile().then(() => setPhase("ready"))} onCancel={() => setPhase("ready")} />}
+    {phase === "profile-setup" && <ProfileSetup existingRoles={(Object.keys(profile?.assets ?? {}) as PhotoRole[]).filter((role) =>
+      !missing.some((requirement) => rolesForRequirement(requirement).includes(role))
+    )} onSaved={() => void reloadProfile().then(() => setPhase("ready"))} onCancel={() => setPhase("ready")} />}
     {phase === "profile-manager" && <ProfileManager profile={profile} legacyImage={legacyImage} onChanged={reloadProfile} onClose={() => setPhase(products.length ? "ready" : "empty")} />}
     {phase === "youcam-consent" && <div className="youcam-consent"><YouCamConsent busy={consentBusy} error={consentError} onAccept={() => void acceptYouCamConsent()} onCancel={() => setPhase("ready")} /></div>}
     {phase === "ready" && <section>

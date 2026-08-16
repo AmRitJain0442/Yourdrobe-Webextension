@@ -3,11 +3,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepareProfileImage } from "../profile/image";
-import { saveAsset, saveAttributes } from "../profile/store";
+import { saveAsset } from "../profile/store";
 import { ProfileSetup } from "./ProfileSetup";
 
 vi.mock("../profile/image", () => ({ prepareProfileImage: vi.fn() }));
-vi.mock("../profile/store", () => ({ saveAsset: vi.fn(), saveAttributes: vi.fn() }));
+vi.mock("../profile/store", () => ({ saveAsset: vi.fn() }));
 
 let root: Root;
 let host: HTMLDivElement;
@@ -26,7 +26,6 @@ beforeEach(() => {
     metadata: { role, mime_type: "image/jpeg", width: 720, height: 720, byte_size: 1, updated_at: "2026-08-15T00:00:00.000Z" },
   }));
   vi.mocked(saveAsset).mockResolvedValue({} as never);
-  vi.mocked(saveAttributes).mockResolvedValue({} as never);
   onSaved.mockClear();
   host = document.createElement("div");
   document.body.append(host);
@@ -39,26 +38,36 @@ afterEach(() => {
 });
 
 describe("ProfileSetup", () => {
-  it("requires consent before saving selected progressive profile photos", async () => {
+  it("asks only for the five required profile photos", async () => {
     await act(async () => {
-      root.render(<ProfileSetup requirements={["face_front", "hand_wrist"]} productTypes={["makeup", "watch"]} onSaved={onSaved} onCancel={vi.fn()} />);
+      root.render(<ProfileSetup onSaved={onSaved} onCancel={vi.fn()} />);
+    });
+
+    expect(host.querySelectorAll('input[type="file"]')).toHaveLength(5);
+    expect(host.textContent).toContain("Front face photo");
+    expect(host.textContent).toContain("Left face photo");
+    expect(host.textContent).toContain("Right face photo");
+    expect(host.textContent).toContain("Front full-body photo");
+    expect(host.textContent).toContain("Side full-body photo");
+    expect(host.textContent).not.toContain("Height (cm)");
+    expect(host.textContent).not.toContain("Top size");
+  });
+
+  it("requires consent before saving the five profile photos", async () => {
+    await act(async () => {
+      root.render(<ProfileSetup onSaved={onSaved} onCancel={vi.fn()} />);
     });
     expect(host.textContent).toContain("Front face photo");
-    expect(host.textContent).toContain("Hand and wrist photo");
-    expect(host.querySelectorAll('input[type="file"]')).toHaveLength(2);
+    expect(host.textContent).toContain("Side full-body photo");
+    expect(host.querySelectorAll('input[type="file"]')).toHaveLength(5);
 
-    const select = host.querySelector("select") as HTMLSelectElement;
-    select.value = "right_hand_wrist";
-    await act(async () => { select.dispatchEvent(new Event("change", { bubbles: true })); });
-    const [face, hand] = Array.from(host.querySelectorAll('input[type="file"]')) as HTMLInputElement[];
+    const inputs = Array.from(host.querySelectorAll('input[type="file"]')) as HTMLInputElement[];
     await act(async () => {
-      choose(face, new File(["face"], "face.jpg", { type: "image/jpeg" }));
-      choose(hand, new File(["hand"], "hand.jpg", { type: "image/jpeg" }));
+      inputs.forEach((input, index) => choose(input, new File([String(index)], `${index}.jpg`, { type: "image/jpeg" })));
     });
     const button = Array.from(host.querySelectorAll("button")).find((item) => item.textContent === "Save profile photos") as HTMLButtonElement;
     await act(async () => { button.click(); });
     expect(saveAsset).not.toHaveBeenCalled();
-    expect(saveAttributes).not.toHaveBeenCalled();
     expect(host.textContent).toContain("browser-local profile storage and per-run transmission");
     expect(host.textContent).toContain("127.0.0.1:8001");
     expect(host.querySelector('[role="alert"]')?.textContent).toBe("Agree to browser-local storage and per-run transmission before saving.");
@@ -66,9 +75,9 @@ describe("ProfileSetup", () => {
     const consent = host.querySelector('input[type="checkbox"]') as HTMLInputElement;
     await act(async () => { consent.click(); });
     await act(async () => { button.click(); await new Promise((resolve) => setTimeout(resolve)); });
-    expect(saveAsset).toHaveBeenCalledTimes(2);
-    expect(prepareProfileImage).toHaveBeenCalledWith(face.files?.[0], "face_front");
-    expect(prepareProfileImage).toHaveBeenCalledWith(hand.files?.[0], "right_hand_wrist");
+    expect(saveAsset).toHaveBeenCalledTimes(5);
+    expect(prepareProfileImage).toHaveBeenCalledWith(inputs[0].files?.[0], "face_front");
+    expect(prepareProfileImage).toHaveBeenCalledWith(inputs[4].files?.[0], "full_body_side");
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
@@ -76,50 +85,44 @@ describe("ProfileSetup", () => {
     let releaseFirstSave = () => {};
     vi.mocked(saveAsset).mockImplementationOnce(() => new Promise((resolve) => { releaseFirstSave = () => resolve({} as never); })).mockResolvedValue({} as never);
     await act(async () => {
-      root.render(<ProfileSetup requirements={["face_front", "hand_wrist"]} productTypes={[]} onSaved={onSaved} onCancel={vi.fn()} />);
+      root.render(<ProfileSetup onSaved={onSaved} onCancel={vi.fn()} />);
     });
-    const [face, hand] = Array.from(host.querySelectorAll('input[type="file"]')) as HTMLInputElement[];
+    const inputs = Array.from(host.querySelectorAll('input[type="file"]')) as HTMLInputElement[];
     await act(async () => {
-      choose(face, new File(["face"], "face.jpg", { type: "image/jpeg" }));
-      choose(hand, new File(["hand"], "hand.jpg", { type: "image/jpeg" }));
+      inputs.forEach((input, index) => choose(input, new File([String(index)], `${index}.jpg`, { type: "image/jpeg" })));
       (host.querySelector('input[type="checkbox"]') as HTMLInputElement).click();
     });
     const button = Array.from(host.querySelectorAll("button")).find((item) => item.textContent === "Save profile photos") as HTMLButtonElement;
     await act(async () => { button.click(); await Promise.resolve(); });
     expect(saveAsset).toHaveBeenCalledTimes(1);
-    await act(async () => { releaseFirstSave(); await Promise.resolve(); });
-    expect(saveAsset).toHaveBeenCalledTimes(2);
+    await act(async () => { releaseFirstSave(); await new Promise((resolve) => setTimeout(resolve)); });
+    expect(saveAsset).toHaveBeenCalledTimes(5);
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
   it("does not write any assets when one selected photo is invalid", async () => {
     vi.mocked(prepareProfileImage).mockImplementation(async (_file, role) => {
-      if (role === "right_hand_wrist") throw new Error("Choose a clearer hand photo.");
+      if (role === "face_right") throw new Error("Choose a clearer face photo.");
       return { blob: new Blob(), metadata: { role, mime_type: "image/jpeg", width: 720, height: 720, byte_size: 0, updated_at: "2026-08-15T00:00:00.000Z" } };
     });
     await act(async () => {
-      root.render(<ProfileSetup requirements={["face_front", "hand_wrist"]} productTypes={[]} onSaved={onSaved} onCancel={vi.fn()} />);
+      root.render(<ProfileSetup onSaved={onSaved} onCancel={vi.fn()} />);
     });
-    const select = host.querySelector("select") as HTMLSelectElement;
-    select.value = "right_hand_wrist";
-    await act(async () => { select.dispatchEvent(new Event("change", { bubbles: true })); });
-    const [face, hand] = Array.from(host.querySelectorAll('input[type="file"]')) as HTMLInputElement[];
+    const inputs = Array.from(host.querySelectorAll('input[type="file"]')) as HTMLInputElement[];
     await act(async () => {
-      choose(face, new File(["face"], "face.jpg", { type: "image/jpeg" }));
-      choose(hand, new File(["hand"], "hand.jpg", { type: "image/jpeg" }));
+      inputs.forEach((input, index) => choose(input, new File([String(index)], `${index}.jpg`, { type: "image/jpeg" })));
       (host.querySelector('input[type="checkbox"]') as HTMLInputElement).click();
     });
     const button = Array.from(host.querySelectorAll("button")).find((item) => item.textContent === "Save profile photos") as HTMLButtonElement;
     await act(async () => { button.click(); await new Promise((resolve) => setTimeout(resolve)); });
-    expect(host.textContent).toContain("Choose a clearer hand photo.");
+    expect(host.textContent).toContain("Choose a clearer face photo.");
     expect(saveAsset).not.toHaveBeenCalled();
-    expect(saveAttributes).not.toHaveBeenCalled();
     expect(onSaved).not.toHaveBeenCalled();
   });
 
   it("places upload guidance before the input and associates guidance and errors", async () => {
     await act(async () => {
-      root.render(<ProfileSetup requirements={["face_front"]} productTypes={[]} onSaved={onSaved} onCancel={vi.fn()} />);
+      root.render(<ProfileSetup existingRoles={["face_left", "face_right", "full_body_front", "full_body_side"]} onSaved={onSaved} onCancel={vi.fn()} />);
     });
     const input = host.querySelector('input[type="file"]') as HTMLInputElement;
     const guidance = host.querySelector(".profile-guidance") as HTMLParagraphElement;
@@ -142,7 +145,7 @@ describe("ProfileSetup", () => {
     vi.mocked(prepareProfileImage).mockImplementationOnce(() => new Promise((resolve) => { releasePreparation = resolve; }));
     const onCancel = vi.fn();
     await act(async () => {
-      root.render(<ProfileSetup requirements={["face_front"]} productTypes={[]} onSaved={onSaved} onCancel={onCancel} />);
+      root.render(<ProfileSetup existingRoles={["face_left", "face_right", "full_body_front", "full_body_side"]} onSaved={onSaved} onCancel={onCancel} />);
     });
     const input = host.querySelector('input[type="file"]') as HTMLInputElement;
     await act(async () => {
@@ -161,7 +164,6 @@ describe("ProfileSetup", () => {
 
     expect(onCancel).toHaveBeenCalledOnce();
     expect(saveAsset).not.toHaveBeenCalled();
-    expect(saveAttributes).not.toHaveBeenCalled();
     expect(onSaved).not.toHaveBeenCalled();
   });
 
@@ -169,7 +171,7 @@ describe("ProfileSetup", () => {
     let releasePreparation!: (value: Awaited<ReturnType<typeof prepareProfileImage>>) => void;
     vi.mocked(prepareProfileImage).mockImplementationOnce(() => new Promise((resolve) => { releasePreparation = resolve; }));
     await act(async () => {
-      root.render(<ProfileSetup requirements={["face_front"]} productTypes={[]} onSaved={onSaved} onCancel={vi.fn()} />);
+      root.render(<ProfileSetup existingRoles={["face_left", "face_right", "full_body_front", "full_body_side"]} onSaved={onSaved} onCancel={vi.fn()} />);
     });
     const input = host.querySelector('input[type="file"]') as HTMLInputElement;
     const consent = host.querySelector('input[type="checkbox"]') as HTMLInputElement;
@@ -190,7 +192,6 @@ describe("ProfileSetup", () => {
     expect(controlsWereDisabled).toBe(true);
     expect(prepareProfileImage).toHaveBeenCalledOnce();
     expect(saveAsset).toHaveBeenCalledOnce();
-    expect(saveAttributes).toHaveBeenCalledOnce();
     expect(onSaved).toHaveBeenCalledOnce();
   });
 });

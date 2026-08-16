@@ -37,7 +37,13 @@ const product = {
 const fullBodyProfile: ProfileMetadata = {
   version: 2,
   consented_at: "2026-08-15T00:00:00.000Z",
-  assets: { full_body_front: { role: "full_body_front", mime_type: "image/png", width: 400, height: 800, byte_size: 10, updated_at: "2026-08-15T00:00:00.000Z" } },
+  assets: {
+    face_front: { role: "face_front", mime_type: "image/png", width: 720, height: 720, byte_size: 10, updated_at: "2026-08-15T00:00:00.000Z" },
+    face_left: { role: "face_left", mime_type: "image/png", width: 720, height: 720, byte_size: 10, updated_at: "2026-08-15T00:00:00.000Z" },
+    face_right: { role: "face_right", mime_type: "image/png", width: 720, height: 720, byte_size: 10, updated_at: "2026-08-15T00:00:00.000Z" },
+    full_body_front: { role: "full_body_front", mime_type: "image/png", width: 720, height: 1280, byte_size: 10, updated_at: "2026-08-15T00:00:00.000Z" },
+    full_body_side: { role: "full_body_side", mime_type: "image/png", width: 720, height: 1280, byte_size: 10, updated_at: "2026-08-15T00:00:00.000Z" },
+  },
   attributes: {},
 };
 const activeTop: ActiveOutfit = {
@@ -159,6 +165,21 @@ afterEach(() => {
 });
 
 describe("App", () => {
+  it("requires all five core photos even when the product source photo exists", async () => {
+    vi.mocked(loadProfile).mockResolvedValue({
+      ...fullBodyProfile,
+      assets: { full_body_front: fullBodyProfile.assets.full_body_front },
+    });
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
+
+    await renderApp();
+    await click("Try these products");
+
+    expect(host.textContent).toContain("4 of 5 required photos still needed");
+    expect(host.textContent).toContain("Front face photo");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/sessions"))).toBe(false);
+  });
+
   it("opens full-body setup before requesting a dress without profile metadata", async () => {
     (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
     const fetchMock = vi.fn();
@@ -325,6 +346,7 @@ describe("App", () => {
 
   it("uses a saved top as the shared source for later bottoms", async () => {
     vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
     const secondProduct = { ...product, title: "Second bottom", product_url: "https://amazon.in/dp/BOTTOM2", product_type: "bottom" as const };
     (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
