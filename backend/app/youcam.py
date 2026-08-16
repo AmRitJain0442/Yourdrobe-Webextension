@@ -141,7 +141,7 @@ class YouCamClient:
 
     @staticmethod
     def _retryable(response: httpx.Response) -> bool:
-        return response.status_code in RETRYABLE_HTTP or response.status_code >= 500
+        return response.status_code in RETRYABLE_HTTP or 500 <= response.status_code < 600
 
     @staticmethod
     def _data(response: httpx.Response) -> dict:
@@ -180,7 +180,7 @@ class YouCamClient:
         return YouCamFailure(self._error_code(response, default), self._message(self._error_code(response, default)))
 
     def _error_code(self, response: httpx.Response, default: str) -> str:
-        error = self._data(response).get("error")
+        error = self._error(response)
         value = error.get("code", "") if isinstance(error, dict) else ""
         code = value.lower() if isinstance(value, str) else ""
         if "nsfw" in code or "safety" in code:
@@ -190,6 +190,19 @@ class YouCamClient:
         if "src" in code or "pose" in code or "image" in code:
             return "invalid_user_image"
         return default
+
+    @staticmethod
+    def _error(response: httpx.Response) -> dict:
+        try:
+            payload = response.json()
+        except ValueError:
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        data = payload.get("data")
+        error = data.get("error") if isinstance(data, dict) else None
+        error = error if isinstance(error, dict) else payload.get("error")
+        return error if isinstance(error, dict) else {}
 
     @classmethod
     def _failed(cls, code: str) -> ProviderTaskState:

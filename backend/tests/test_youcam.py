@@ -1,5 +1,7 @@
 import json
+import os
 import unittest
+from unittest.mock import patch
 
 import httpx
 
@@ -44,6 +46,13 @@ class YouCamClientTest(unittest.TestCase):
         self.assertEqual(client.key_count, 2)
         self.assertNotIn("first", repr(client))
 
+    def test_reads_exact_environment_key_variable_without_leaking_values(self) -> None:
+        with patch.dict(os.environ, {"YOUCAM_API_KEYS": " first ,,second,first "}):
+            client = YouCamClient.from_environment()
+        self.assertTrue(client.enabled)
+        self.assertEqual(client.key_count, 2)
+        self.assertNotIn("first", repr(client))
+
     def test_uploads_image_and_creates_clothes_v3_task(self) -> None:
         started = self.client.create_clothes_task(
             "data:image/jpeg;base64,cGhvdG8=",
@@ -79,6 +88,43 @@ class YouCamClientTest(unittest.TestCase):
         self.assertEqual(started.key_index, 1)
         self.assertEqual(self.authorization_headers, ["Bearer first", "Bearer second"])
 
+    def test_rotates_after_retryable_signed_upload_failure(self) -> None:
+        self.responses = [
+            httpx.Response(200, json={"data": {"files": [{"file_id": "source-file", "requests": [{
+                "url": "https://uploads.example/source", "headers": {},
+            }]}]}}),
+            httpx.Response(503),
+            httpx.Response(200, json={"data": {"files": [{"file_id": "source-file", "requests": [{
+                "url": "https://uploads.example/source", "headers": {},
+            }]}]}}),
+            httpx.Response(200),
+            httpx.Response(200, json={"data": {"task_id": "provider-task"}}),
+        ]
+        started = self.two_key_client.create_clothes_task(
+            "data:image/jpeg;base64,cGhvdG8=", "https://images.example/top.jpg", "upper_body",
+        )
+        self.assertEqual(started.key_index, 1)
+        self.assertEqual([request[0] for request in self.requests], ["POST", "PUT", "POST", "PUT", "POST"])
+
+    def test_rotates_after_retryable_task_creation_failure(self) -> None:
+        self.responses = [
+            httpx.Response(200, json={"data": {"files": [{"file_id": "source-file", "requests": [{
+                "url": "https://uploads.example/source", "headers": {},
+            }]}]}}),
+            httpx.Response(200),
+            httpx.Response(503),
+            httpx.Response(200, json={"data": {"files": [{"file_id": "source-file", "requests": [{
+                "url": "https://uploads.example/source", "headers": {},
+            }]}]}}),
+            httpx.Response(200),
+            httpx.Response(200, json={"data": {"task_id": "provider-task"}}),
+        ]
+        started = self.two_key_client.create_clothes_task(
+            "data:image/jpeg;base64,cGhvdG8=", "https://images.example/top.jpg", "upper_body",
+        )
+        self.assertEqual(started.key_index, 1)
+        self.assertEqual([self.requests[index][2]["authorization"] for index in (2, 5)], ["Bearer first", "Bearer second"])
+
     def test_does_not_rotate_after_invalid_image_response(self) -> None:
         self.responses = [httpx.Response(400, json={"error": {"code": "invalid_image"}})]
         with self.assertRaisesRegex(YouCamFailure, "user image"):
@@ -88,6 +134,46 @@ class YouCamClientTest(unittest.TestCase):
                 "upper_body",
             )
         self.assertEqual(self.authorization_headers, ["Bearer first"])
+
+    def test_maps_root_validation_creation_error_without_key_rotation(self) -> None:
+        self.responses = [
+            httpx.Response(200, json={"data": {"files": [{"file_id": "source-file", "requests": [{
+                "url": "https://uploads.example/source", "headers": {},
+            }]}]}}),
+            httpx.Response(200),
+            httpx.Response(400, json={"error": {"code": "error_invalid_src"}}),
+        ]
+        with self.assertRaisesRegex(YouCamFailure, "user image") as raised:
+            self.two_key_client.create_clothes_task(
+                "data:image/jpeg;base64,cGhvdG8=", "https://images.example/top.jpg", "upper_body",
+            )
+        self.assertEqual(raised.exception.code, "invalid_user_image")
+        self.assertEqual(len(self.requests), 3)
+        self.assertEqual(self.requests[2][2]["authorization"], "Bearer first")
+
+    def test_maps_root_safety_creation_error_without_key_rotation(self) -> None:
+        self.responses = [
+            httpx.Response(200, json={"data": {"files": [{"file_id": "source-file", "requests": [{
+                "url": "https://uploads.example/source", "headers": {},
+            }]}]}}),
+            httpx.Response(200),
+            httpx.Response(400, json={"error": {"code": "error_nsfw_content_detected"}}),
+        ]
+        with self.assertRaisesRegex(YouCamFailure, "safety reasons") as raised:
+            self.two_key_client.create_clothes_task(
+                "data:image/jpeg;base64,cGhvdG8=", "https://images.example/top.jpg", "upper_body",
+            )
+        self.assertEqual(raised.exception.code, "provider_safety_rejection")
+        self.assertEqual(len(self.requests), 3)
+        self.assertEqual(self.requests[2][2]["authorization"], "Bearer first")
+
+    def test_does_not_treat_status_600_as_retryable(self) -> None:
+        self.responses = [httpx.Response(600)]
+        with self.assertRaisesRegex(YouCamFailure, "could not create"):
+            self.two_key_client.create_clothes_task(
+                "data:image/jpeg;base64,cGhvdG8=", "https://images.example/top.jpg", "upper_body",
+            )
+        self.assertEqual(len(self.requests), 1)
 
     def test_rejects_invalid_data_url(self) -> None:
         with self.assertRaisesRegex(YouCamFailure, "user image") as raised:
