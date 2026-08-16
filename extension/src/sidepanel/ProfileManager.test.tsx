@@ -1,15 +1,13 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { prepareProfileImage } from "../profile/image";
-import { assignLegacyImage, deleteAsset, deleteProfile, saveAsset } from "../profile/store";
+import { assignLegacyImage, deleteAsset, deleteProfile } from "../profile/store";
 import type { ProfileMetadata } from "../profile/types";
 import { ProfileManager } from "./ProfileManager";
 
 vi.mock("../profile/store", () => ({
   assignLegacyImage: vi.fn(), deleteAsset: vi.fn(), deleteLegacyImage: vi.fn(), deleteProfile: vi.fn(), saveAsset: vi.fn(),
 }));
-vi.mock("../profile/image", () => ({ prepareProfileImage: vi.fn() }));
 
 let root: Root;
 let host: HTMLDivElement;
@@ -30,22 +28,12 @@ async function renderManager(
   return { onChanged, onClose };
 }
 
-function choose(input: HTMLInputElement, file: File) {
-  Object.defineProperty(input, "files", { configurable: true, value: [file] });
-  input.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
   vi.mocked(assignLegacyImage).mockResolvedValue(profile);
   vi.mocked(deleteAsset).mockResolvedValue(profile);
   vi.mocked(deleteProfile).mockResolvedValue();
-  vi.mocked(prepareProfileImage).mockImplementation(async (_file, role) => ({
-    blob: new Blob([role], { type: "image/jpeg" }),
-    metadata: { role, mime_type: "image/jpeg", width: 800, height: 800, byte_size: 1, updated_at: "2026-08-15T00:00:00.000Z" },
-  }));
-  vi.mocked(saveAsset).mockResolvedValue(profile);
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -65,6 +53,8 @@ describe("ProfileManager", () => {
     expect(host.textContent).toContain("Side full-body photo");
     expect(host.textContent).not.toContain("Optional attributes");
     expect(host.querySelector('input[name="height_cm"]')).toBeNull();
+    expect(host.querySelector('input[type="file"]')).toBeNull();
+    expect(host.textContent).toContain("Replace from one full-body photo");
   });
 
   it("shows existing and legacy photos with profile completion", async () => {
@@ -74,40 +64,12 @@ describe("ProfileManager", () => {
     expect(host.textContent).toContain("1 of 5 required photos saved");
   });
 
-  it("uploads a missing photo directly from profile management", async () => {
-    const { onChanged } = await renderManager(vi.fn(), vi.fn(), profile, null);
-    const leftFace = [...host.querySelectorAll<HTMLElement>(".profile-asset")]
-      .find((asset) => asset.textContent?.includes("Left face photo"));
-    const input = leftFace?.querySelector('input[type="file"]') as HTMLInputElement | null;
+  it("opens the same one-photo generation flow for replacement", async () => {
+    await renderManager(vi.fn(), vi.fn(), profile, null);
+    await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Replace from one full-body photo")?.click(); });
 
-    expect(leftFace).toBeDefined();
-    expect(leftFace!.textContent).toContain("Add photo");
-    expect(input).not.toBeNull();
-
-    await act(async () => {
-      choose(input!, new File(["left"], "left.jpg", { type: "image/jpeg" }));
-      await Promise.resolve();
-    });
-
-    expect(prepareProfileImage).toHaveBeenCalledWith(input?.files?.[0], "face_left");
-    expect(saveAsset).toHaveBeenCalledOnce();
-    expect(onChanged).toHaveBeenCalledOnce();
-  });
-
-  it("requires consent before enabling the first missing photo upload", async () => {
-    await renderManager(vi.fn(), vi.fn(), null, null);
-    const face = [...host.querySelectorAll<HTMLElement>(".profile-asset")]
-      .find((asset) => asset.textContent?.includes("Front face photo"));
-    const input = face?.querySelector('input[type="file"]') as HTMLInputElement | null;
-    const consent = host.querySelector('input[type="checkbox"]') as HTMLInputElement;
-
-    expect(face).toBeDefined();
-    expect(input).not.toBeNull();
-    expect(input!.disabled).toBe(true);
-
-    await act(async () => { consent.click(); });
-
-    expect(input!.disabled).toBe(false);
+    expect(host.textContent).toContain("Create your profile from one photo");
+    expect(host.querySelectorAll('input[type="file"]')).toHaveLength(1);
   });
 
   it("assigns the legacy image to the selected role", async () => {
@@ -123,35 +85,6 @@ describe("ProfileManager", () => {
     await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Assign photo")?.click(); });
     expect(assignLegacyImage).toHaveBeenCalledWith("full_body_side");
     expect(onChanged).toHaveBeenCalled();
-  });
-
-  it("allows only one manager mutation and disables every mutating control", async () => {
-    let releasePreparation!: (value: Awaited<ReturnType<typeof prepareProfileImage>>) => void;
-    vi.mocked(prepareProfileImage).mockImplementationOnce(() => new Promise((resolve) => { releasePreparation = resolve; }));
-    const { onChanged } = await renderManager();
-    const replacement = host.querySelector('input[type="file"]') as HTMLInputElement;
-    const deleteProfileButton = [...host.querySelectorAll("button")].find((button) => button.textContent === "Delete complete profile") as HTMLButtonElement;
-    await act(async () => {
-      choose(replacement, new File(["new"], "new.jpg", { type: "image/jpeg" }));
-      await Promise.resolve();
-    });
-    const controlsWereDisabled = [...host.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input, select, button")]
-      .filter((control) => control.textContent !== "Close")
-      .every((control) => control.matches(":disabled"));
-    await act(async () => {
-      choose(replacement, new File(["newer"], "newer.jpg", { type: "image/jpeg" }));
-      deleteProfileButton.click();
-    });
-    await act(async () => {
-      releasePreparation({ blob: new Blob(["new"], { type: "image/jpeg" }), metadata: { role: "face_front", mime_type: "image/jpeg", width: 800, height: 800, byte_size: 3, updated_at: "2026-08-15T00:00:00.000Z" } });
-      await Promise.resolve();
-    });
-
-    expect(controlsWereDisabled).toBe(true);
-    expect(prepareProfileImage).toHaveBeenCalledOnce();
-    expect(saveAsset).toHaveBeenCalledOnce();
-    expect(deleteProfile).not.toHaveBeenCalled();
-    expect(onChanged).toHaveBeenCalledOnce();
   });
 
   it("deletes one asset only after confirmation", async () => {

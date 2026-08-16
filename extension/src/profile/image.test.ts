@@ -13,10 +13,10 @@ describe("prepareProfileImage", () => {
       .rejects.toThrow("Use a JPEG, PNG, or WebP image.");
   });
 
-  it("rejects a face image below its minimum dimensions", async () => {
+  it("accepts a small source image without imposing provider-independent dimensions", async () => {
     vi.mocked(createImageBitmap).mockResolvedValueOnce({ width: 600, height: 700, close: vi.fn() } as never);
-    await expect(prepareProfileImage(new File(["x"], "face.jpg", { type: "image/jpeg" }), "face_front"))
-      .rejects.toThrow("at least 720 by 720 pixels");
+    const result = await prepareProfileImage(new File(["x"], "face.jpg", { type: "image/jpeg" }), "face_front");
+    expect(result.metadata).toMatchObject({ width: 600, height: 700 });
   });
 
   it("returns metadata for a valid image without retaining its file name", async () => {
@@ -26,13 +26,13 @@ describe("prepareProfileImage", () => {
     expect("name" in result.blob).toBe(false);
   });
 
-  it("rejects an extreme aspect ratio that falls below the minimum after normalization", async () => {
+  it("normalizes an extreme aspect ratio without imposing minimum dimensions", async () => {
     vi.mocked(createImageBitmap).mockResolvedValueOnce({ width: 720, height: 10_000, close: vi.fn() } as never);
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: vi.fn() } as never);
     vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback) => callback(new Blob(["small"], { type: "image/jpeg" })));
 
-    await expect(prepareProfileImage(new File(["x"], "tall.jpg", { type: "image/jpeg" }), "face_front"))
-      .rejects.toThrow("at least 720 by 720 pixels");
+    const result = await prepareProfileImage(new File(["x"], "tall.jpg", { type: "image/jpeg" }), "face_front");
+    expect(result.metadata).toMatchObject({ width: 147, height: 2048 });
   });
 
   it("normalizes oversized images through canvas", async () => {

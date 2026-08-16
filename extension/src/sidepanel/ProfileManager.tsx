@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
-import { prepareProfileImage } from "../profile/image";
 import { profilePhotoRoles, type ProfilePhotoRole } from "../profile/requirements";
-import { assignLegacyImage, deleteAsset, deleteLegacyImage, deleteProfile, saveAsset } from "../profile/store";
+import { assignLegacyImage, deleteAsset, deleteLegacyImage, deleteProfile } from "../profile/store";
 import type { ProfileMetadata } from "../profile/types";
+import { ProfileSetup } from "./ProfileSetup";
 
 type Props = { profile: ProfileMetadata | null; legacyImage: string | null; onChanged: () => Promise<void>; onClose: () => void };
 
@@ -17,6 +17,7 @@ export function ProfileManager({ profile, legacyImage, onChanged, onClose }: Pro
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [replacing, setReplacing] = useState(false);
   const mutation = useRef(false);
   const assets = profile?.assets ?? {};
 
@@ -33,15 +34,6 @@ export function ProfileManager({ profile, legacyImage, onChanged, onClose }: Pro
       mutation.current = false;
       setBusy(false);
     }
-  }
-
-  async function replace(role: ProfilePhotoRole, file?: File) {
-    if (!file) return;
-    if (!profile && !consent) { setError("Agree to browser-local storage and per-run transmission before saving this photo."); return; }
-    await runMutation(async () => {
-      await saveAsset(await prepareProfileImage(file, role));
-      await onChanged();
-    }, "We could not save that photo.");
   }
 
   async function removeAsset(role: ProfilePhotoRole) {
@@ -71,15 +63,20 @@ export function ProfileManager({ profile, legacyImage, onChanged, onClose }: Pro
     if (deleted) onClose();
   }
 
+  if (replacing) return <ProfileSetup
+    onSaved={() => { void onChanged().then(() => setReplacing(false)); }}
+    onCancel={() => setReplacing(false)}
+  />;
+
   return <section className="profile-manager" aria-busy={busy}>
     <div className="profile-heading"><h2>Manage your profile</h2><button type="button" className="secondary" disabled={busy} onClick={onClose}>Close</button></div>
     <p className="profile-completion">{roles.filter((role) => assets[role]).length} of {roles.length} required photos saved.</p>
+    <button type="button" disabled={busy} onClick={() => setReplacing(true)}>Replace from one full-body photo</button>
     {(legacyImage || !profile) && <label className="check"><input type="checkbox" disabled={busy} checked={consent} onChange={(event) => setConsent(event.target.checked)} />I agree to browser-local profile storage and per-run transmission of required photos to 127.0.0.1:8001.</label>}
     <div className="list">{roles.map((role) => {
       const asset = assets[role];
       return <article className="profile-asset" key={role}>
-        <div><h3>{labels[role]}</h3>{asset ? <p>Updated {new Date(asset.updated_at).toLocaleDateString()}</p> : <p>Photo needed</p>}</div>
-        <label>{asset ? "Replace photo" : "Add photo"}<input type="file" disabled={busy || (!profile && !consent)} accept="image/jpeg,image/png,image/webp" onChange={(event) => void replace(role, event.target.files?.[0])} /></label>
+        <div><h3>{labels[role]}</h3>{asset ? <p>Updated {new Date(asset.updated_at).toLocaleDateString()}</p> : <p>Generated from your next full-body upload</p>}</div>
         {asset && <button type="button" className="secondary" disabled={busy} onClick={() => void removeAsset(role)}>Delete photo</button>}
       </article>;
     })}</div>
