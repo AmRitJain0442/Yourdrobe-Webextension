@@ -32,7 +32,9 @@ ships with:
 | `--color-text-secondary` | `#6f6f76` | Tagline |
 
 The side panel already renders a `Y` brand mark and a `✦` sparkle motif. The logo
-formalises both rather than replacing them.
+carries the sparkle forward and replaces the bare letter with a clothes hanger,
+which is legible at favicon size and says "wardrobe" without needing the wordmark
+beside it.
 
 ## Assets
 
@@ -40,7 +42,7 @@ Three hand-authored SVG files under `docs/assets/`:
 
 | File | Contents | Use |
 | --- | --- | --- |
-| `mark.svg` | Rounded tile, brand gradient, hanger glyph whose shoulders read as a `Y`, sparkle accent | README hero, future extension action icon |
+| `mark.svg` | Rounded tile, brand gradient, clothes hanger glyph, sparkle accent | README hero, future extension action icon |
 | `logo.svg` | Horizontal lockup: mark, `YOURDROBE` wordmark, tagline, dark text | Light backgrounds |
 | `logo-dark.svg` | Same lockup with light text | Dark backgrounds |
 
