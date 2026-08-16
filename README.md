@@ -18,13 +18,15 @@ npm.cmd --prefix extension run build
 
 ### Mock mode (default)
 
-With no YouCam keys configured, the backend keeps local development and test runs offline and returns results labelled `Mock AI preview`:
+To force mock mode, including when `backend/.env` has keys, set an empty process value before starting or restarting Uvicorn. It takes precedence without changing the local file:
 
 ```powershell
-Remove-Item Env:YOUCAM_API_KEYS -ErrorAction SilentlyContinue
+$env:YOUCAM_API_KEYS=''
 $env:PYTHONPATH='backend'
 backend/.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8001
 ```
+
+The backend then stays offline and returns results labelled `Mock AI preview`.
 
 ### Live YouCam mode
 
