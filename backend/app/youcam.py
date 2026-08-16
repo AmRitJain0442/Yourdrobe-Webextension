@@ -1,0 +1,207 @@
+from dataclasses import dataclass
+import base64
+import os
+from typing import Literal
+from urllib.parse import urlparse
+
+import httpx
+
+
+API_BASE = "https://yce-api-01.makeupar.com"
+FILE_PATH = "/s2s/v2.0/file/cloth-v3"
+TASK_PATH = "/s2s/v2.0/task/cloth-v3"
+RETRYABLE_HTTP = {401, 403, 429}
+GarmentCategory = Literal["upper_body", "lower_body", "full_body"]
+
+
+@dataclass(frozen=True)
+class StartedTask:
+    task_id: str
+    key_index: int
+
+
+@dataclass(frozen=True)
+class ProviderTaskState:
+    status: Literal["processing", "completed", "failed"]
+    result_url: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class YouCamFailure(Exception):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class YouCamClient:
+    def __init__(self, keys: tuple[str, ...], client: httpx.Client | None = None) -> None:
+        self._keys = keys
+        self._client = client or httpx.Client(timeout=10.0)
+
+    @classmethod
+    def from_environment(cls) -> "YouCamClient":
+        return cls.from_value(os.getenv("YOUCAM_API_KEYS", ""))
+
+    @classmethod
+    def from_value(cls, value: str, client: httpx.Client | None = None) -> "YouCamClient":
+        keys = tuple(dict.fromkeys(item.strip() for item in value.split(",") if item.strip()))
+        return cls(keys, client)
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self._keys)
+
+    @property
+    def key_count(self) -> int:
+        return len(self._keys)
+
+    def create_clothes_task(
+        self,
+        source_data_url: str,
+        reference_url: str,
+        garment_category: GarmentCategory,
+    ) -> StartedTask:
+        image, content_type, extension = self._image(source_data_url)
+        if not self._is_https(reference_url):
+            raise YouCamFailure("invalid_product_image", "YouCam could not use this product image.")
+        if garment_category not in ("upper_body", "lower_body", "full_body"):
+            raise YouCamFailure("provider_processing_failed", "YouCam could not create this preview.")
+        all_rate_limited = True
+        for key_index, key in enumerate(self._keys):
+            headers = {"Authorization": f"Bearer {key}"}
+            try:
+                metadata = self._client.post(
+                    f"{API_BASE}{FILE_PATH}", headers=headers, json={"files": [{
+                        "content_type": content_type,
+                        "file_name": f"source.{extension}",
+                        "file_size": len(image),
+                    }]},
+                )
+                if self._retryable(metadata):
+                    all_rate_limited = all_rate_limited and metadata.status_code == 429
+                    continue
+                if metadata.is_error:
+                    raise self._failure_from_response(metadata, "invalid_user_image")
+                upload = self._upload_details(metadata)
+                uploaded = self._client.put(upload[1], headers=upload[2], content=image)
+                if self._retryable(uploaded):
+                    all_rate_limited = all_rate_limited and uploaded.status_code == 429
+                    continue
+                if uploaded.is_error:
+                    raise YouCamFailure("invalid_user_image", "YouCam could not use this user image.")
+                created = self._client.post(f"{API_BASE}{TASK_PATH}", headers=headers, json={
+                    "src_file_id": upload[0], "ref_file_url": reference_url, "garment_category": garment_category,
+                })
+                if self._retryable(created):
+                    all_rate_limited = all_rate_limited and created.status_code == 429
+                    continue
+                if created.is_error:
+                    raise self._failure_from_response(created, "invalid_product_image")
+                task_id = self._data(created).get("task_id")
+                if isinstance(task_id, str):
+                    return StartedTask(task_id, key_index)
+                raise YouCamFailure("provider_processing_failed", "YouCam could not create this preview.")
+            except httpx.RequestError:
+                all_rate_limited = False
+                continue
+        if all_rate_limited and self._keys:
+            raise YouCamFailure("youcam_rate_limited", "YouCam is rate limited. Please try again later.")
+        raise YouCamFailure("youcam_keys_exhausted", "YouCam is temporarily unavailable.")
+
+    def get_task(self, task_id: str, key_index: int) -> ProviderTaskState:
+        if not 0 <= key_index < len(self._keys):
+            return self._failed("provider_processing_failed")
+        try:
+            response = self._client.get(
+                f"{API_BASE}{TASK_PATH}/{task_id}", headers={"Authorization": f"Bearer {self._keys[key_index]}"},
+            )
+        except httpx.RequestError:
+            return ProviderTaskState(status="processing")
+        if self._retryable(response):
+            return ProviderTaskState(status="processing")
+        if response.is_error:
+            return self._failed(self._error_code(response, "provider_processing_failed"))
+        data = self._data(response)
+        if data.get("task_status") == "success":
+            result = data.get("results")
+            if isinstance(result, dict) and isinstance(result.get("url"), str):
+                return ProviderTaskState(status="completed", result_url=result["url"])
+        if data.get("task_status") == "error":
+            return self._failed(self._error_code(response, "provider_processing_failed"))
+        return ProviderTaskState(status="processing")
+
+    @staticmethod
+    def _is_https(value: str) -> bool:
+        try:
+            parsed = urlparse(value)
+        except ValueError:
+            return False
+        return parsed.scheme == "https" and bool(parsed.hostname)
+
+    @staticmethod
+    def _retryable(response: httpx.Response) -> bool:
+        return response.status_code in RETRYABLE_HTTP or response.status_code >= 500
+
+    @staticmethod
+    def _data(response: httpx.Response) -> dict:
+        try:
+            data = response.json().get("data", {})
+        except (ValueError, AttributeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _image(self, value: str) -> tuple[bytes, str, str]:
+        prefix, marker, encoded = value.partition(",")
+        details = {
+            "data:image/jpeg;base64": ("image/jpg", "jpg"),
+            "data:image/png;base64": ("image/png", "png"),
+        }.get(prefix)
+        if not marker or not details:
+            raise YouCamFailure("invalid_user_image", "YouCam could not use this user image.")
+        try:
+            return base64.b64decode(encoded, validate=True), *details
+        except ValueError:
+            raise YouCamFailure("invalid_user_image", "YouCam could not use this user image.") from None
+
+    def _upload_details(self, response: httpx.Response) -> tuple[str, str, dict[str, str]]:
+        files = self._data(response).get("files")
+        if not isinstance(files, list) or not files or not isinstance(files[0], dict):
+            raise YouCamFailure("provider_processing_failed", "YouCam could not create this preview.")
+        requests = files[0].get("requests")
+        if not isinstance(requests, list) or not requests or not isinstance(requests[0], dict):
+            raise YouCamFailure("provider_processing_failed", "YouCam could not create this preview.")
+        file_id, url, headers = files[0].get("file_id"), requests[0].get("url"), requests[0].get("headers")
+        if not isinstance(file_id, str) or not isinstance(url, str) or not isinstance(headers, dict):
+            raise YouCamFailure("provider_processing_failed", "YouCam could not create this preview.")
+        return file_id, url, {str(key): str(value) for key, value in headers.items()}
+
+    def _failure_from_response(self, response: httpx.Response, default: str) -> YouCamFailure:
+        return YouCamFailure(self._error_code(response, default), self._message(self._error_code(response, default)))
+
+    def _error_code(self, response: httpx.Response, default: str) -> str:
+        error = self._data(response).get("error")
+        value = error.get("code", "") if isinstance(error, dict) else ""
+        code = value.lower() if isinstance(value, str) else ""
+        if "nsfw" in code or "safety" in code:
+            return "provider_safety_rejection"
+        if "ref" in code or "download" in code:
+            return "invalid_product_image"
+        if "src" in code or "pose" in code or "image" in code:
+            return "invalid_user_image"
+        return default
+
+    @classmethod
+    def _failed(cls, code: str) -> ProviderTaskState:
+        return ProviderTaskState(status="failed", error_code=code, error_message=cls._message(code))
+
+    @staticmethod
+    def _message(code: str) -> str:
+        return {
+            "invalid_user_image": "YouCam could not use this user image.",
+            "invalid_product_image": "YouCam could not use this product image.",
+            "provider_safety_rejection": "YouCam rejected this request for safety reasons.",
+        }.get(code, "YouCam could not complete this preview.")
+
+    def __repr__(self) -> str:
+        return f"YouCamClient(key_count={len(self._keys)})"
