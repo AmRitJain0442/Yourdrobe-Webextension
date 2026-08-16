@@ -330,7 +330,7 @@ export function App() {
     {phase === "youcam-consent" && <div className="youcam-consent"><YouCamConsent busy={consentBusy} error={consentError} onAccept={() => void acceptYouCamConsent()} onCancel={() => setPhase("ready")} /></div>}
     {phase === "ready" && <section>
       <h2>{products.length} products ready</h2>
-      <div className="list">{products.map((product, index) => <div key={product.product_url}><ProductRow product={product} />
+      <div className="list preview-strip">{products.map((product, index) => <div key={product.product_url}><ProductRow product={product} />
         {(!product.product_type || product.product_type === "unknown") && <label>Choose product type for {product.title}<select required value={product.product_type ?? "unknown"} onChange={(event) => setProducts((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, product_type: event.target.value as ProductType } : item))}><option value="unknown">Choose product type</option>{selectableProductTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
       </div>)}</div>
       {canExtendActiveOutfit && <p><strong>Add-on mode:</strong> clothing previews will start from your saved active outfit.</p>}
@@ -341,7 +341,7 @@ export function App() {
     {phase === "empty" && <section><h2>No products found on this page.</h2><p>Browse a product listing or search results on this supported site, then retry.</p><button onClick={() => location.reload()}>Retry</button></section>}
     {phase === "results" && <section>
       <h2>Your previews</h2>
-      <div className="list">{results.map(({ product, job }) => {
+      <div className="list preview-strip">{results.map(({ product, job }) => {
         const failed = job.status === "failed" || (job.mock === false && !isHttpsUrl(job.result_url));
         return <article className="product" key={job.job_id}>
           <div><span className="badge">{job.mock === false ? "YouCam AI preview" : "Mock AI preview"}</span><h3>{product.title}</h3></div>

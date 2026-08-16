@@ -20,4 +20,10 @@ describe("side panel button contrast", () => {
     expect(css).toMatch(/\.active-outfit\s*{[^}]*margin-bottom:[^;]+;/);
     expect(css).toMatch(/\.active-outfit img\s*{[^}]*max-height:[^;]+;[^}]*object-fit:\s*contain;/);
   });
+
+  it("keeps the active outfit large and preview choices horizontally scrollable", () => {
+    expect(css).toMatch(/\.active-outfit img\s*{[^}]*height:\s*min\(60vh,\s*560px\);[^}]*object-fit:\s*contain;/);
+    expect(css).toMatch(/\.preview-strip\s*{[^}]*display:\s*flex;[^}]*overflow-x:\s*auto;[^}]*scroll-snap-type:\s*x mandatory;/);
+    expect(css).toMatch(/\.preview-strip > \*\s*{[^}]*flex:\s*0 0 min\(86%,\s*320px\);[^}]*scroll-snap-align:\s*start;/);
+  });
 });
