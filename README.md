@@ -59,7 +59,7 @@ The side panel can search Amazon India, Amazon US, Flipkart, or Nykaa for you. C
 
 ## Live YouCam clothing previews and privacy
 
-- Live YouCam supports clothing only: top, outerwear, bottom, and dress.
+- Live YouCam supports top, outerwear, bottom, and dress through Clothes V3, plus footwear through the separate Shoes API.
 - A profile requires exactly five uploads: front, left, and right face photos plus front and side full-body photos.
 - Yourdrobe does not ask for body measurements or clothing sizes.
 - Live clothing uses the front full-body profile photo when starting from the original profile photo.
@@ -72,15 +72,16 @@ The side panel can search Amazon India, Amazon US, Flipkart, or Nykaa for you. C
 - A completed live preview can be saved with **Use as active outfit**. Yourdrobe downloads and stores one rendered image browser-locally; it does not store the provider result URL.
 - Later live clothing previews use the active outfit as their source. Select one product card at a time, save its result, then select the next product to compose it.
 - The active outfit is shown as a large preview. New product and generated preview choices use a horizontal scrolling gallery.
-- Clothes V3 cannot render bags, belts, or jewelry. When an active clothing outfit exists, these products can be selected with **Add to outfit without preview** and are included in finalization without pretending that an AI preview was generated.
+- Shoe cards ask for a Women or Men preview model and expose **Try these shoes**. The Shoes API uses the active outfit image when one is saved, otherwise it uses the front full-body profile photo.
+- Bags, belts, and jewelry are not supported by the current provider workflow. When an active outfit exists, these products can be selected with **Add to outfit without preview** and are included in finalization without pretending that an AI preview was generated.
 - **Finalize outfit and open carts** opens each selected retailer product page, uses its visible Add to Cart or Add to Bag control, and opens the matching retailer cart. Products that require a size, colour, sign-in, CAPTCHA, or another choice stay open for manual completion and are not reported as added.
 - **Reset to original profile photo** removes the active outfit. Deleting the complete profile removes it too.
 - Sequential raster edits can alter previously rendered items, so a later preview is not a lossless edit of the earlier one.
-- Shoes and accessories remain future provider-specific integrations.
+- Additional provider-specific integrations remain future work for bags, belts, and jewelry.
 - Provider result URLs expire after two hours. Saving a rendered result can fail after its temporary provider URL expires; unsaved live results remain available only for the current side-panel session.
 - Profile photos, active outfits, and profile metadata are stored locally in this Chrome browser on this device. Using an active outfit for another live preview uploads its saved image to Perfect Corp.
 
-See the official [Clothes V3 API](https://docs.perfectcorp.com/reference/ai_clothes/section/overview) and [file retention period](https://docs.perfectcorp.com/develop/file_retention_period) documentation.
+See the official [Clothes V3 API](https://docs.perfectcorp.com/reference/ai_clothes/section/overview), [Shoes API](https://docs.perfectcorp.com/reference/ai_shoes), and [file retention period](https://docs.perfectcorp.com/develop/file_retention_period) documentation.
 
 ## Manual real-key smoke test
 
