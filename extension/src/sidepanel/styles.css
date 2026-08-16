@@ -29,7 +29,7 @@ section { padding: 16px; border: 1px solid var(--border); border-radius: var(--r
 label { display: grid; gap: 8px; margin: 16px 0; font-weight: 700; }
 .check { grid-template-columns: 20px 1fr; align-items: start; font-weight: 500; }
 .youcam-consent button + button { margin-top: 8px; }
-input[type="file"] { min-height: 44px; width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); }
+input[type="file"], input[type="search"], select { min-height: 44px; width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); }
 input[type="checkbox"] { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
 button, .button { display: inline-grid; min-height: 44px; width: 100%; place-items: center; border: 0; border-radius: var(--radius); padding: 12px 16px; background: var(--accent); color: #fff; font: inherit; font-weight: 800; text-decoration: none; cursor: pointer; }
 button:hover { background: var(--accent-active); }
@@ -46,6 +46,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .product p { margin: 0 0 6px; }
 .product a:not(.button) { display: inline-flex; min-height: 44px; align-items: center; color: var(--accent-active); font-weight: 700; }
 .active-outfit { margin-bottom: 16px; }
+.product-search { margin-top: 16px; }
+.product-search p { margin-bottom: 0; }
 .active-outfit img { max-height: 220px; object-fit: contain; }
 .active-outfit h2, .active-outfit h3, .active-outfit p, .outfit-message { margin-top: 0; }
 .error { color: var(--danger); font-weight: 700; }

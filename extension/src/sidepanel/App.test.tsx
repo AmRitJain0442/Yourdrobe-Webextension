@@ -97,7 +97,9 @@ function requestBody(path: string) {
 
 async function click(name: string) {
   await act(async () => {
-    [...host.querySelectorAll("button")].find((button) => button.textContent === name)?.click();
+    const buttons = [...host.querySelectorAll("button")];
+    (buttons.find((button) => button.textContent === name)
+      ?? (name === "Try these products" ? buttons.find((button) => button.textContent === "Add these products to active outfit") : undefined))?.click();
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
@@ -125,6 +127,7 @@ beforeEach(() => {
     tabs: {
       query: vi.fn().mockResolvedValue([{ id: 1 }]),
       sendMessage: vi.fn().mockResolvedValue({ ok: true, products: [product] }),
+      update: vi.fn().mockResolvedValue({ id: 1 }),
       onUpdated: {
         addListener: vi.fn((listener) => { onTabUpdated = listener; }),
         removeListener: vi.fn(),
@@ -187,6 +190,41 @@ describe("App", () => {
 
     expect(host.textContent).toContain("Baggy jeans");
     expect(host.textContent).not.toContain("Daily essential");
+  });
+
+  it("searches a selected marketplace and keeps the active outfit for the new results", async () => {
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    await renderApp();
+    const query = host.querySelector('input[type="search"]') as HTMLInputElement;
+    const store = host.querySelector('select[aria-label="Marketplace"]') as HTMLSelectElement;
+    expect(query).not.toBeNull();
+    expect(store).not.toBeNull();
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(query, "baggy jeans");
+      query.dispatchEvent(new Event("input", { bubbles: true }));
+      store.value = "flipkart";
+      store.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await click("Search");
+
+    expect(chrome.tabs.update).toHaveBeenCalledWith(1, { url: "https://www.flipkart.com/search?q=baggy%20jeans" });
+    expect(host.textContent).toContain("Reading products from this page");
+
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      products: [{ ...product, platform: "flipkart", title: "Baggy jeans", product_url: "https://www.flipkart.com/item/p/1", product_type: "bottom" }],
+    });
+    await act(async () => {
+      onTabUpdated?.(1, { status: "complete" }, { id: 1, active: true } as chrome.tabs.Tab);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain("Baggy jeans");
+    expect(host.textContent).toContain("Saved linen top");
+    expect(host.textContent).toContain("Add these products to active outfit");
+    expect(host.textContent).toContain("clothing previews will start from your saved active outfit");
   });
 
   it("requires all five core photos even when the product source photo exists", async () => {
@@ -580,7 +618,7 @@ describe("App", () => {
     (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
     await renderApp();
     const resetButton = [...host.querySelectorAll("button")].find((item) => item.textContent === "Reset to original profile photo") as HTMLButtonElement;
-    const tryButton = [...host.querySelectorAll("button")].find((item) => item.textContent === "Try these products") as HTMLButtonElement;
+    const tryButton = [...host.querySelectorAll("button")].find((item) => item.textContent === "Add these products to active outfit") as HTMLButtonElement;
 
     await act(async () => {
       resetButton.click();

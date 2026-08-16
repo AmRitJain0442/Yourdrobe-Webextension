@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { ExtractProductsResponse, Product, ProductType, TryOnJob } from "../types";
 import { missingRequirements, profilePhotoRoles, requirementsForProducts, rolesForRequirement } from "../profile/requirements";
 import { deleteActiveOutfit, LocalProfileAssetMissingError, loadActiveOutfit, loadLegacyImage, loadProfile, loadRequiredAssets, saveActiveOutfit, saveYouCamConsent } from "../profile/store";
@@ -25,6 +25,13 @@ const selectableProductTypes: ProductType[] = [
   "dress", "bottom", "belt", "bag", "watch", "bracelet", "ring", "footwear",
 ];
 const activeOutfitProductTypes = new Set<ProductType>(["top", "outerwear", "bottom", "dress"]);
+type SearchStore = Product["platform"];
+const searchStores: { value: SearchStore; label: string; url: (query: string) => string }[] = [
+  { value: "amazon_in", label: "Amazon India", url: (query) => `https://www.amazon.in/s?k=${query}` },
+  { value: "amazon_us", label: "Amazon US", url: (query) => `https://www.amazon.com/s?k=${query}` },
+  { value: "flipkart", label: "Flipkart", url: (query) => `https://www.flipkart.com/search?q=${query}` },
+  { value: "nykaa", label: "Nykaa", url: (query) => `https://www.nykaa.com/search/result/?q=${query}` },
+];
 const requiresOriginalFullBody = (products: Product[]) => products.some((product) =>
   !activeOutfitProductTypes.has(product.product_type ?? "unknown")
   && requirementsForProducts([product]).includes("full_body_front"),
@@ -58,9 +65,14 @@ export function App() {
   const [outfitBusy, setOutfitBusy] = useState(false);
   const [outfitStatus, setOutfitStatus] = useState("");
   const [outfitError, setOutfitError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchStore, setSearchStore] = useState<SearchStore>("amazon_in");
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchError, setSearchError] = useState("");
   const activeRequest = useRef<AbortController | null>(null);
   const outfitMutation = useRef(false);
   const mounted = useRef(true);
+  const canExtendActiveOutfit = Boolean(activeOutfit) && products.slice(0, 5).some((product) => activeOutfitProductTypes.has(product.product_type ?? "unknown"));
 
   useEffect(() => {
     mounted.current = true;
@@ -73,6 +85,7 @@ export function App() {
     ]).then(([foundProducts, foundProfile, foundLegacyImage, foundActiveOutfit]) => {
       if (cancelled) return;
       setProducts(foundProducts);
+      if (foundProducts[0]) setSearchStore(foundProducts[0].platform);
       setProfile(foundProfile);
       setLegacyImage(foundLegacyImage);
       setActiveOutfit(foundActiveOutfit);
@@ -89,6 +102,7 @@ export function App() {
       void extractProducts(tabId).then((foundProducts) => {
         if (cancelled) return;
         setProducts(foundProducts);
+        if (foundProducts[0]) setSearchStore(foundProducts[0].platform);
         setResults([]);
         setError("");
         setPhase(foundProducts.length ? "ready" : "empty");
@@ -112,6 +126,26 @@ export function App() {
     setProfile(nextProfile);
     setLegacyImage(nextLegacyImage);
     setActiveOutfit(nextActiveOutfit);
+  }
+
+  async function searchProducts(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const query = searchQuery.trim();
+    if (!query || searchBusy) return;
+    setSearchBusy(true);
+    setSearchError("");
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) throw new Error("No active browser tab was found.");
+      const store = searchStores.find((item) => item.value === searchStore) ?? searchStores[0];
+      await chrome.tabs.update(tab.id, { url: store.url(encodeURIComponent(query)) });
+      setResults([]);
+      setPhase("loading");
+    } catch (reason) {
+      setSearchError(reason instanceof Error ? reason.message : "Could not start the product search.");
+    } finally {
+      if (mounted.current) setSearchBusy(false);
+    }
   }
 
   async function runDemo(currentProfile = profile) {
@@ -299,7 +333,8 @@ export function App() {
       <div className="list">{products.map((product, index) => <div key={product.product_url}><ProductRow product={product} />
         {(!product.product_type || product.product_type === "unknown") && <label>Choose product type for {product.title}<select required value={product.product_type ?? "unknown"} onChange={(event) => setProducts((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, product_type: event.target.value as ProductType } : item))}><option value="unknown">Choose product type</option>{selectableProductTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
       </div>)}</div>
-      <button disabled={outfitBusy || products.some((product) => !product.product_type || product.product_type === "unknown")} onClick={() => void runDemo()}>Try these products</button>
+      {canExtendActiveOutfit && <p><strong>Add-on mode:</strong> clothing previews will start from your saved active outfit.</p>}
+      <button disabled={outfitBusy || products.some((product) => !product.product_type || product.product_type === "unknown")} onClick={() => void runDemo()}>{canExtendActiveOutfit ? "Add these products to active outfit" : "Try these products"}</button>
       <button className="secondary" disabled={outfitBusy} onClick={openProfileManager}>Manage profile</button>
     </section>}
     {phase === "running" && <p role="status">Creating your previews...</p>}
@@ -320,6 +355,16 @@ export function App() {
       <button className="secondary" disabled={outfitBusy} onClick={openProfileManager}>Manage profile</button>
     </section>}
     {phase === "error" && <section><p className="error" role="alert">{error}</p><button onClick={() => location.reload()}>Retry</button></section>}
+    {(["ready", "results", "empty", "error"] as Phase[]).includes(phase) && <section className="product-search" aria-labelledby="product-search-heading">
+      <h2 id="product-search-heading">Find your next piece</h2>
+      <p>Search a supported store and see its top-ranked results here.</p>
+      <form onSubmit={(event) => void searchProducts(event)}>
+        <label>What are you looking for?<input type="search" required minLength={2} maxLength={100} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Baggy jeans" /></label>
+        <label>Store<select aria-label="Marketplace" value={searchStore} onChange={(event) => setSearchStore(event.target.value as SearchStore)}>{searchStores.map((store) => <option key={store.value} value={store.value}>{store.label}</option>)}</select></label>
+        <button disabled={searchBusy}>{searchBusy ? "Searching..." : "Search"}</button>
+      </form>
+      {searchError && <p className="error" role="alert">{searchError}</p>}
+    </section>}
   </main>;
 }
 
