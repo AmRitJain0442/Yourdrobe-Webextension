@@ -16,6 +16,7 @@ const unsupported = "Open a supported Amazon, Flipkart, or Nykaa listing page an
 const maxPolls = 40;
 const pollDelayMs = 2_000;
 const pollDeadlineMs = 80_000;
+const productPageSize = 25;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const isHttpsUrl = (value?: string) => {
   if (!value) return false;
@@ -64,6 +65,7 @@ const outfitItem = (product: Product): OutfitItem | null => product.product_type
 export function App() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [products, setProducts] = useState<Product[]>([]);
+  const [productPage, setProductPage] = useState(0);
   const [profile, setProfile] = useState<ProfileMetadata | null>(null);
   const [legacyImage, setLegacyImage] = useState<string | null>(null);
   const [activeOutfit, setActiveOutfit] = useState<ActiveOutfit | null>(null);
@@ -103,6 +105,7 @@ export function App() {
     ]).then(([foundProducts, foundProfile, foundLegacyImage, foundActiveOutfit, foundOutfitItems, foundOutfitVersions]) => {
       if (cancelled) return;
       setProducts(foundProducts);
+      setProductPage(0);
       if (foundProducts[0]) setSearchStore(foundProducts[0].platform);
       setProfile(foundProfile);
       setLegacyImage(foundLegacyImage);
@@ -122,6 +125,7 @@ export function App() {
       void extractProducts(tabId).then((foundProducts) => {
         if (cancelled) return;
         setProducts(foundProducts);
+        setProductPage(0);
         pendingProducts.current = [];
         if (foundProducts[0]) setSearchStore(foundProducts[0].platform);
         setResults([]);
@@ -437,6 +441,9 @@ export function App() {
     if (!outfitMutation.current) setPhase("profile-manager");
   }
 
+  const productPageCount = Math.ceil(products.length / productPageSize);
+  const visibleProducts = products.slice(productPage * productPageSize, (productPage + 1) * productPageSize);
+
   return <main>
     <header><span className="eyebrow">Yourdrobe</span><h1>Your fitting room, anywhere.</h1></header>
     {phase === "loading" && <p role="status">Reading products from this page...</p>}
@@ -452,13 +459,18 @@ export function App() {
     {phase === "youcam-consent" && <div className="youcam-consent"><YouCamConsent busy={consentBusy} error={consentError} onAccept={() => void acceptYouCamConsent()} onCancel={() => setPhase("ready")} /></div>}
     {phase === "ready" && <section>
       <h2>{products.length} products ready</h2>
-      <div className="list preview-strip">{products.map((product, index) => <div key={product.product_url}><ProductRow product={product} />
-        {(!product.product_type || product.product_type === "unknown") && <label>Choose product type for {product.title}<select required value={product.product_type ?? "unknown"} onChange={(event) => setProducts((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, product_type: event.target.value as ProductType } : item))}><option value="unknown">Choose product type</option>{selectableProductTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
+      <div className="list preview-strip product-page">{visibleProducts.map((product, index) => <div key={product.product_url}><ProductRow product={product} />
+        {(!product.product_type || product.product_type === "unknown") && <label>Choose product type for {product.title}<select required value={product.product_type ?? "unknown"} onChange={(event) => setProducts((current) => current.map((item, itemIndex) => itemIndex === productPage * productPageSize + index ? { ...item, product_type: event.target.value as ProductType } : item))}><option value="unknown">Choose product type</option>{selectableProductTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
         {activeOutfit && product.product_type && product.product_type !== "unknown" && !activeOutfitProductTypes.has(product.product_type) && <button className="secondary" disabled={outfitBusy} onClick={() => void addWithoutPreview(product)}>Add to outfit without preview</button>}
         {product.product_type === "footwear" && <label>Shoe preview model<select aria-label="Shoe preview model" value={shoeGenders[product.product_url] ?? ""} onChange={(event) => setShoeGenders((current) => ({ ...current, [product.product_url]: event.target.value as ShoeGender }))}><option value="">Choose Women or Men</option><option value="female">Women</option><option value="male">Men</option></select></label>}
         {product.product_type && product.product_type !== "unknown" && activeOutfitProductTypes.has(product.product_type) && <button disabled={outfitBusy || (product.product_type === "footwear" && !shoeGenders[product.product_url])} onClick={() => previewProduct(product)}>{product.product_type === "footwear" ? "Try these shoes" : `Try this ${product.product_type}`}</button>}
         {!activeOutfit && product.product_type && product.product_type !== "unknown" && !activeOutfitProductTypes.has(product.product_type) && <p className="preview-unavailable">AI preview is not available for {product.product_type} with the current provider.</p>}
       </div>)}</div>
+      {productPageCount > 1 && <nav className="product-pagination" aria-label="Product pages">
+        <button className="secondary" disabled={productPage === 0} onClick={() => setProductPage((page) => page - 1)}>Previous page</button>
+        <span aria-live="polite">Page {productPage + 1} of {productPageCount}</span>
+        <button className="secondary" disabled={productPage + 1 === productPageCount} onClick={() => setProductPage((page) => page + 1)}>Next page</button>
+      </nav>}
       <button className="secondary" disabled={outfitBusy} onClick={openProfileManager}>Manage profile</button>
     </section>}
     {phase === "running" && <p role="status">Creating your previews...</p>}

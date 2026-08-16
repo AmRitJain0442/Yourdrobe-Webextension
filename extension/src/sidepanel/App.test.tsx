@@ -187,6 +187,35 @@ afterEach(() => {
 });
 
 describe("App", () => {
+  it("shows 25 products per page and lets the user browse the rest", async () => {
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      products: Array.from({ length: 30 }, (_, index) => ({
+        ...product,
+        title: `Product ${index + 1}`,
+        product_url: `https://amazon.in/dp/${index + 1}`,
+        product_type: "top" as const,
+      })),
+    });
+
+    await renderApp();
+
+    expect(host.querySelectorAll(".product-page > div")).toHaveLength(25);
+    expect(host.textContent).toContain("Page 1 of 2");
+    expect(host.textContent).toContain("Product 25");
+    expect(host.textContent).not.toContain("Product 26");
+
+    await click("Next page");
+
+    expect(host.querySelectorAll(".product-page > div")).toHaveLength(5);
+    expect(host.textContent).toContain("Page 2 of 2");
+    expect(host.textContent).toContain("Product 26");
+    expect(host.textContent).not.toContain("Product 25");
+
+    await click("Previous page");
+    expect(host.textContent).toContain("Page 1 of 2");
+  });
+
   it("refreshes products when the active shopping page finishes navigating", async () => {
     await renderApp();
     expect(host.textContent).toContain("Daily essential");

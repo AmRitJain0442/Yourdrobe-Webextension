@@ -38,5 +38,5 @@ export function visible(root: Element): boolean {
 }
 
 export function valid(products: Product[]): Product[] {
-  return products.filter((item) => item.title && item.image_url && item.product_url).slice(0, 5);
+  return products.filter((item) => item.title && item.image_url && item.product_url);
 }

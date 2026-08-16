@@ -53,18 +53,12 @@ describe("commerce adapters", () => {
     });
   }
 
-  it("caps extraction at five visible products", () => {
-    document.body.innerHTML = Array.from({ length: 6 }, (_, index) => `
+  it("extracts every visible product for side-panel pagination", () => {
+    document.body.innerHTML = Array.from({ length: 30 }, (_, index) => `
       <div data-component-type="s-search-result"><h2><a href="/dp/${index}"><span>Shirt ${index}</span></a></h2><img src="https://img/${index}.jpg"></div>`).join("");
     const products = selectAdapter("www.amazon.in", document)?.extractProducts() ?? [];
-    expect(products).toHaveLength(5);
-    expect(products.map((product) => product.product_url)).toEqual([
-      "https://www.amazon.in/dp/0",
-      "https://www.amazon.in/dp/1",
-      "https://www.amazon.in/dp/2",
-      "https://www.amazon.in/dp/3",
-      "https://www.amazon.in/dp/4",
-    ]);
+    expect(products).toHaveLength(30);
+    expect(products.at(-1)?.product_url).toBe("https://www.amazon.in/dp/29");
   });
 
   it("extracts Amazon's title-recipe card markup", () => {
