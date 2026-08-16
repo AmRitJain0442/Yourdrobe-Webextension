@@ -10,7 +10,8 @@ const stores: Record<OutfitItem["platform"], { host: string; cart: string }> = {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function waitForLoad(tab: chrome.tabs.Tab): Promise<void> {
+function waitForLoad(tab?: chrome.tabs.Tab): Promise<void> {
+  if (!tab) return Promise.reject(new Error("The shopping tab could not be opened."));
   if (tab.status === "complete") return Promise.resolve();
   if (!tab.id) return Promise.reject(new Error("The product tab could not be opened."));
   return new Promise((resolve, reject) => {
@@ -62,30 +63,28 @@ async function sendCartMessage(tabId: number): Promise<AddToCartResponse> {
 export async function addOutfitToCarts(input: unknown[]) {
   const valid = input.filter(validItem);
   const items = valid.filter((item, index) => valid.findIndex((candidate) => candidate.product_url === item.product_url) === index).slice(0, 20);
+  if (!items.length) return { added: 0, needs_attention: [], carts_opened: 0 };
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!activeTab?.id) throw new Error("No active shopping tab is available.");
   const needs_attention: string[] = [];
-  const addedStores = new Set<OutfitItem["platform"]>();
   let added = 0;
   for (const item of items) {
-    let tab: chrome.tabs.Tab | undefined;
     try {
-      tab = await chrome.tabs.create({ active: false, url: item.product_url });
+      const tab = await chrome.tabs.update(activeTab.id, { active: true, url: item.product_url });
       await waitForLoad(tab);
-      if (!tab.id) throw new Error("The product tab could not be opened.");
-      const response = await sendCartMessage(tab.id);
+      const response = await sendCartMessage(activeTab.id);
       if (!response.ok) {
-        await chrome.tabs.update(tab.id, { active: true });
         needs_attention.push(item.title);
-        continue;
+        return { added, needs_attention, carts_opened: 0 };
       }
       await delay(1_200);
-      await chrome.tabs.remove(tab.id);
       added += 1;
-      addedStores.add(item.platform);
     } catch {
       needs_attention.push(item.title);
-      if (tab?.id) await chrome.tabs.update(tab.id, { active: true }).catch(() => undefined);
+      return { added, needs_attention, carts_opened: 0 };
     }
   }
-  for (const platform of addedStores) await chrome.tabs.create({ active: true, url: stores[platform].cart });
-  return { added, needs_attention, carts_opened: addedStores.size };
+  const cartTab = await chrome.tabs.update(activeTab.id, { active: true, url: stores[items.at(-1)!.platform].cart });
+  await waitForLoad(cartTab);
+  return { added, needs_attention, carts_opened: 1 };
 }

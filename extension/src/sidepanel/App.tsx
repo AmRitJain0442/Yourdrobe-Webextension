@@ -470,8 +470,8 @@ function ActiveOutfitPanel({ outfit, items, busy, onRemove, onFinalize, onReset 
     <img src={outfit.image_data_url} alt={`Active outfit: ${outfit.metadata.product_title}`} />
     <div><h3>{displayed.length} selected {displayed.length === 1 ? "product" : "products"}</h3><ul className="outfit-items">{displayed.map((item) => <li key={item.product_url}><span>{item.title} · {item.product_type}</span>{items.length > 0 && !activeOutfitProductTypes.has(item.product_type) && <button className="text-action" disabled={busy} aria-label={`Remove ${item.title}`} onClick={() => onRemove(item.product_url)}>Remove</button>}</li>)}</ul></div>
     <p>Saved browser-locally on this device. Using it for another live preview uploads this saved image to Perfect Corp.</p>
-    <p>Finalizing opens each product page, adds available items to the retailer cart, and then opens the cart. Products needing a size, colour, or sign-in stay open for you.</p>
-    <button disabled={busy || !items.length} onClick={onFinalize}>Finalize outfit and open carts</button>
+    <p>Finalizing visits each product in this tab, adds available items, and leaves this tab on the final retailer cart. If an item needs a size, colour, or sign-in, the process stops there for you.</p>
+    <button disabled={busy || !items.length} onClick={onFinalize}>Finalize outfit in this tab</button>
     <a href={outfit.metadata.product_url} target="_blank" rel="noreferrer">View original product</a>
     <button className="secondary" disabled={busy} onClick={onReset}>Reset to original profile photo</button>
   </article>;

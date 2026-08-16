@@ -309,7 +309,7 @@ describe("App", () => {
     vi.mocked(loadOutfitItems).mockResolvedValue(items);
 
     await renderApp();
-    await click("Finalize outfit and open carts");
+    await click("Finalize outfit in this tab");
 
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: "FINALIZE_OUTFIT", items });
     expect(host.textContent).toContain("2 products added");
