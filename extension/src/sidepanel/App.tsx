@@ -13,7 +13,13 @@ type Result = { product: NormalizedProduct; job: TryOnJob };
 const unsupported = "Open a supported Amazon, Flipkart, or Nykaa listing page and try again.";
 const maxPolls = 40;
 const pollDelayMs = 2_000;
+const pollDeadlineMs = 80_000;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const isHttpsUrl = (value?: string) => {
+  if (!value) return false;
+  try { return new URL(value).protocol === "https:"; }
+  catch { return false; }
+};
 const selectableProductTypes: ProductType[] = [
   "makeup", "eyewear", "headwear", "earrings", "necklace", "top", "outerwear",
   "dress", "bottom", "belt", "bag", "watch", "bracelet", "ring", "footwear",
@@ -85,6 +91,8 @@ export function App() {
     activeRequest.current = request;
     setPhase("running");
     setError("");
+    let pollDeadline: AbortController | undefined;
+    let pollDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       const capabilities = await getCapabilities(request.signal);
       if (request.signal.aborted) return;
@@ -102,13 +110,20 @@ export function App() {
       const assets = await loadRequiredAssets(roles);
       const started = await startDemo(assets, currentProfile?.attributes ?? {}, selectedProducts, Boolean(currentProfile?.youcam_consented_at), request.signal);
       if (request.signal.aborted) return;
+      pollDeadline = new AbortController();
+      pollDeadlineTimer = setTimeout(
+        () => pollDeadline?.abort(new DOMException("Polling timed out", "TimeoutError")),
+        pollDeadlineMs,
+      );
+      const pollSignal = AbortSignal.any([request.signal, pollDeadline.signal]);
       let current = started.jobs;
       for (let polls = 0; current.some((job) => job.status === "queued" || job.status === "processing") && polls < maxPolls; polls += 1) {
         await delay(pollDelayMs);
         if (request.signal.aborted) return;
         current = await Promise.all(current.map((job) =>
-          job.status === "completed" || job.status === "failed" ? job : getJob(job.job_id, request.signal),
+          job.status === "completed" || job.status === "failed" ? job : getJob(job.job_id, pollSignal),
         ));
+        if (pollDeadline.signal.aborted) throw new Error("The preview is taking too long. Please try again.");
         if (request.signal.aborted) return;
       }
       if (current.some((job) => job.status === "queued" || job.status === "processing")) throw new Error("The preview is taking too long. Please try again.");
@@ -120,6 +135,11 @@ export function App() {
       setPhase("results");
     } catch (reason) {
       if (request.signal.aborted) return;
+      if (pollDeadline?.signal.aborted) {
+        setError("The preview is taking too long. Please try again.");
+        setPhase("error");
+        return;
+      }
       if (reason instanceof MissingProfileAssetsError) {
         setMissing(reason.roles);
         setPhase("profile-setup");
@@ -135,6 +155,7 @@ export function App() {
       setError(reason instanceof Error ? reason.message : "The local backend is unavailable.");
       setPhase("error");
     } finally {
+      if (pollDeadlineTimer) clearTimeout(pollDeadlineTimer);
       if (activeRequest.current === request) activeRequest.current = null;
     }
   }
@@ -170,17 +191,20 @@ export function App() {
       <button disabled={products.some((product) => !product.product_type || product.product_type === "unknown")} onClick={() => void runDemo()}>Try these products</button>
       <button className="secondary" onClick={() => setPhase("profile-manager")}>Manage profile</button>
     </section>}
-    {phase === "running" && <p role="status">Creating your mock previews...</p>}
+    {phase === "running" && <p role="status">Creating your previews...</p>}
     {phase === "empty" && <section><h2>No products found on this page.</h2><p>Browse a product listing or search results on this supported site, then retry.</p><button onClick={() => location.reload()}>Retry</button></section>}
     {phase === "results" && <section>
       <h2>Your previews</h2>
-      <div className="list">{results.map(({ product, job }) => <article className="product" key={job.job_id}>
-        <div><span className="badge">{job.mock === false ? "YouCam AI preview" : "Mock AI preview"}</span><h3>{product.title}</h3></div>
-        {job.status === "failed"
-          ? <p className="error">{job.error_message ?? "This product preview failed. You can still view the original listing."}</p>
-          : <img src={job.result_url || product.image_url} alt={`Mock preview of ${product.title}`} />}
-        <a className="button secondary" href={product.product_url} target="_blank" rel="noreferrer">View original product</a>
-      </article>)}</div>
+      <div className="list">{results.map(({ product, job }) => {
+        const failed = job.status === "failed" || (job.mock === false && !isHttpsUrl(job.result_url));
+        return <article className="product" key={job.job_id}>
+          <div><span className="badge">{job.mock === false ? "YouCam AI preview" : "Mock AI preview"}</span><h3>{product.title}</h3></div>
+          {failed
+            ? <p className="error">{job.error_message ?? "This product preview failed. You can still view the original listing."}</p>
+            : <img src={job.result_url || product.image_url} alt={`Preview of ${product.title}`} />}
+          <a className="button secondary" href={product.product_url} target="_blank" rel="noreferrer">View original product</a>
+        </article>;
+      })}</div>
       <button className="secondary" onClick={() => setPhase("profile-manager")}>Manage profile</button>
     </section>}
     {phase === "error" && <section><p className="error" role="alert">{error}</p><button onClick={() => location.reload()}>Retry</button></section>}

@@ -30,6 +30,7 @@ describe("YouCamConsent", () => {
     const accept = screenButton("Agree and create live preview");
     expect(host.textContent).toContain("Perfect Corp");
     expect(host.textContent).toContain("up to 30 days");
+    expect(host.textContent).toContain("download URL is temporary");
     expect(accept.disabled).toBe(true);
     await act(async () => (host.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
     expect(accept.disabled).toBe(false);

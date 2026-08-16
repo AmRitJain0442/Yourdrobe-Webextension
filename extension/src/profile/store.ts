@@ -130,6 +130,10 @@ export function loadRequiredAssets(roles: PhotoRole[]): Promise<ProfileAssetUplo
       let bitmap: ImageBitmap | undefined;
       try {
         bitmap = await createImageBitmap(blob);
+      } catch {
+        return removeCorruptAsset(profile, role, blob);
+      }
+      try {
         let uploadBlob = blob;
         if (blob.type === "image/webp") {
           const canvas = document.createElement("canvas");
@@ -141,8 +145,6 @@ export function loadRequiredAssets(roles: PhotoRole[]): Promise<ProfileAssetUplo
           uploadBlob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((jpeg) => jpeg ? resolve(jpeg) : reject(new Error("We could not process that image.")), "image/jpeg", 0.9));
         }
         uploads.push({ kind: role, image_data_url: await dataUrl(uploadBlob) });
-      } catch {
-        await removeCorruptAsset(profile, role, blob);
       } finally {
         bitmap?.close();
       }

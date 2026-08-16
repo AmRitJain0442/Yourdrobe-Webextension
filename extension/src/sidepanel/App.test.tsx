@@ -118,6 +118,7 @@ afterEach(() => {
   root = null;
   host.remove();
   vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -246,7 +247,18 @@ describe("App", () => {
 
     expect(host.textContent).toContain("YouCam AI preview");
     expect(host.textContent).not.toContain("Mock AI preview");
+    expect(host.querySelector("img")?.alt).toBe("Preview of Daily essential");
     expect(JSON.stringify((chrome.storage.local.set as ReturnType<typeof vi.fn>).mock.calls)).not.toContain("provider.example/result.jpg");
+  });
+
+  it("does not show the listing image as a completed live result", async () => {
+    mockCapabilities("youcam", ["dress"]);
+    mockCompletedJob({ mock: false, result_url: "" });
+
+    await completeRun();
+
+    expect(host.textContent).toContain("This product preview failed.");
+    expect(host.querySelector("article.product img")).toBeNull();
   });
 
   it("shows the provider failure and original listing", async () => {
@@ -384,6 +396,39 @@ describe("App", () => {
     expect(pollCount()).toBe(1);
   });
 
+  it("allows a live batch request to outlast the normal backend call timeout", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), milliseconds);
+      return controller.signal;
+    });
+    vi.mocked(loadProfile).mockResolvedValue({ ...fullBodyProfile, youcam_consented_at: "2026-08-16T00:00:00.000Z" });
+    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
+    mockCapabilities("youcam", ["dress"]);
+    fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/tryons/batch")) return new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve(new Response(JSON.stringify({ jobs: [{ job_id: "job", product_id: "product", status: "completed", mock: false, result_url: "https://provider.example/result.jpg" }] }), { status: 200 })), 15_000);
+        init?.signal?.addEventListener("abort", () => { clearTimeout(timer); reject(init.signal?.reason); }, { once: true });
+      });
+      const body = url.endsWith("/capabilities") ? capabilities
+        : url.endsWith("/sessions") ? { session_id: "session" }
+          : url.endsWith("/profiles") ? { profile_id: "profile" }
+            : { products: [{ ...product, product_type: "dress", id: "product" }] };
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderApp();
+    await click("Try these products");
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(host.textContent).toContain("Creating your previews...");
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(host.textContent).toContain("Your previews");
+  });
+
   it("stops after 40 polls with the timeout message", async () => {
     vi.useFakeTimers();
     vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
@@ -396,6 +441,34 @@ describe("App", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(80_000); });
 
     expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/tryons/job"))).toHaveLength(40);
+    expect(host.textContent).toContain("The preview is taking too long. Please try again.");
+  });
+
+  it("uses an 80-second wall-clock deadline when polling responses are slow", async () => {
+    vi.useFakeTimers();
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
+    batchJob = { job_id: "job", product_id: "product", status: "processing", mock: true };
+    fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/tryons/job")) return new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve(new Response(JSON.stringify(batchJob), { status: 200 })), 9_000);
+        init?.signal?.addEventListener("abort", () => { clearTimeout(timer); reject(init.signal?.reason); }, { once: true });
+      });
+      const body = url.endsWith("/capabilities") ? capabilities
+        : url.endsWith("/sessions") ? { session_id: "session" }
+          : url.endsWith("/profiles") ? { profile_id: "profile" }
+            : url.endsWith("/products/normalize") ? { products: [{ ...product, product_type: "dress", id: "product" }] }
+              : { jobs: [batchJob] };
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderApp();
+    await click("Try these products");
+    await act(async () => { await vi.advanceTimersByTimeAsync(80_000); });
+
     expect(host.textContent).toContain("The preview is taking too long. Please try again.");
   });
 

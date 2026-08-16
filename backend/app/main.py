@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
 from app.youcam import ProviderTaskState, YouCamClient, YouCamFailure
 
@@ -18,7 +18,7 @@ PhotoRole = Literal[
 
 class ProfileAssetInput(BaseModel):
     kind: PhotoRole
-    image_data_url: str
+    image_data_url: str = Field(min_length=1, max_length=14_000_000)
 
 
 class ProfileAttributesInput(BaseModel):
@@ -72,7 +72,7 @@ class BatchInput(BaseModel):
     profile_id: str
     product_ids: list[str] = Field(min_length=1, max_length=5)
     assets: list[ProfileAssetInput] = Field(default_factory=list, max_length=11)
-    cloud_consent: bool = False
+    cloud_consent: StrictBool = False
 
 
 app = FastAPI(title="Yourdrobe Demo API")
@@ -219,7 +219,8 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
             created.append({"job_id": job_id, "product_id": product_id, "status": "queued"})
         return {"jobs": created}
 
-    if not body.cloud_consent:
+    has_supported_product = any(product["product_type"] in LIVE_MAPPING for product in resolved_products)
+    if has_supported_product and not body.cloud_consent:
         raise HTTPException(400, {"code": "live_consent_required"})
     asset_by_role = {asset.kind: asset.image_data_url for asset in body.assets}
     missing = {
@@ -265,7 +266,11 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
             "job_id": job_id,
             "product_id": product_id,
             "status": "failed" if "error_code" in job else "queued",
-            **({"error_code": job["error_code"]} if "error_code" in job else {}),
+            **({
+                "error_code": job["error_code"],
+                "error_message": job["error_message"],
+                "mock": False,
+            } if "error_code" in job else {}),
         })
     return {"jobs": created}
 

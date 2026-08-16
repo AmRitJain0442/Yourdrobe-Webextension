@@ -167,6 +167,30 @@ class YouCamClientTest(unittest.TestCase):
         self.assertEqual(len(self.requests), 3)
         self.assertEqual(self.requests[2][2]["authorization"], "Bearer first")
 
+    def test_maps_string_data_error_without_key_rotation(self) -> None:
+        self.responses = [
+            httpx.Response(200, json={"data": {"files": [{"file_id": "source-file", "requests": [{
+                "url": "https://uploads.example/source", "headers": {},
+            }]}]}}),
+            httpx.Response(200),
+            httpx.Response(400, json={"data": {"error": "error_invalid_src"}}),
+        ]
+        with self.assertRaises(YouCamFailure) as raised:
+            self.two_key_client.create_clothes_task(
+                "data:image/jpeg;base64,cGhvdG8=", "https://images.example/top.jpg", "upper_body",
+            )
+        self.assertEqual(raised.exception.code, "invalid_user_image")
+        self.assertEqual(len(self.requests), 3)
+
+    def test_maps_root_error_code_without_key_rotation(self) -> None:
+        self.responses = [httpx.Response(400, json={"error_code": "error_nsfw_content_detected"})]
+        with self.assertRaises(YouCamFailure) as raised:
+            self.two_key_client.create_clothes_task(
+                "data:image/jpeg;base64,cGhvdG8=", "https://images.example/top.jpg", "upper_body",
+            )
+        self.assertEqual(raised.exception.code, "provider_safety_rejection")
+        self.assertEqual(len(self.requests), 1)
+
     def test_does_not_treat_status_600_as_retryable(self) -> None:
         self.responses = [httpx.Response(600)]
         with self.assertRaisesRegex(YouCamFailure, "could not create"):
@@ -205,6 +229,14 @@ class YouCamClientTest(unittest.TestCase):
             self.two_key_client.create_clothes_task("data:image/jpeg;base64,cGhvdG8=", "https://images.example/top.jpg", "upper_body")
         self.assertEqual(raised.exception.code, "youcam_rate_limited")
 
+    def test_rejects_empty_provider_task_id(self) -> None:
+        self.responses[2] = httpx.Response(200, json={"data": {"task_id": "  "}})
+        with self.assertRaises(YouCamFailure) as raised:
+            self.client.create_clothes_task(
+                "data:image/jpeg;base64,cGhvdG8=", "https://images.example/top.jpg", "upper_body",
+            )
+        self.assertEqual(raised.exception.code, "provider_processing_failed")
+
     def test_polls_with_creating_key_and_maps_success(self) -> None:
         self.responses = [httpx.Response(200, json={
             "data": {"task_status": "success", "results": {"url": "https://provider.example/result.jpg"}},
@@ -215,6 +247,18 @@ class YouCamClientTest(unittest.TestCase):
             result_url="https://provider.example/result.jpg",
         ))
         self.assertEqual(self.authorization_headers, ["Bearer second"])
+
+    def test_rejects_empty_or_non_https_success_result_url(self) -> None:
+        for result_url in ("", "http://provider.example/result.jpg"):
+            with self.subTest(result_url=result_url):
+                self.responses = [httpx.Response(200, json={
+                    "data": {"task_status": "success", "results": {"url": result_url}},
+                })]
+                self.assertEqual(self.client.get_task("provider-task", 0), ProviderTaskState(
+                    status="failed",
+                    error_code="provider_processing_failed",
+                    error_message="YouCam could not complete this preview.",
+                ))
 
     def test_maps_non_terminal_poll_to_processing(self) -> None:
         self.responses = [httpx.Response(200, json={"data": {"task_status": "processing"}})]

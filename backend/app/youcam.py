@@ -11,6 +11,8 @@ API_BASE = "https://yce-api-01.makeupar.com"
 FILE_PATH = "/s2s/v2.0/file/cloth-v3"
 TASK_PATH = "/s2s/v2.0/task/cloth-v3"
 RETRYABLE_HTTP = {401, 403, 429}
+PROVIDER_TIMEOUT_SECONDS = 5.0
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
 GarmentCategory = Literal["upper_body", "lower_body", "full_body"]
 
 
@@ -37,7 +39,7 @@ class YouCamFailure(Exception):
 class YouCamClient:
     def __init__(self, keys: tuple[str, ...], client: httpx.Client | None = None) -> None:
         self._keys = keys
-        self._client = client or httpx.Client(timeout=10.0)
+        self._client = client or httpx.Client(timeout=PROVIDER_TIMEOUT_SECONDS)
 
     @classmethod
     def from_environment(cls) -> "YouCamClient":
@@ -99,8 +101,8 @@ class YouCamClient:
                 if created.is_error:
                     raise self._failure_from_response(created, "invalid_product_image")
                 task_id = self._data(created).get("task_id")
-                if isinstance(task_id, str):
-                    return StartedTask(task_id, key_index)
+                if isinstance(task_id, str) and task_id.strip():
+                    return StartedTask(task_id.strip(), key_index)
                 raise YouCamFailure("provider_processing_failed", "YouCam could not create this preview.")
             except httpx.RequestError:
                 all_rate_limited = False
@@ -125,8 +127,9 @@ class YouCamClient:
         data = self._data(response)
         if data.get("task_status") == "success":
             result = data.get("results")
-            if isinstance(result, dict) and isinstance(result.get("url"), str):
+            if isinstance(result, dict) and isinstance(result.get("url"), str) and self._is_https(result["url"]):
                 return ProviderTaskState(status="completed", result_url=result["url"])
+            return self._failed("provider_processing_failed")
         if data.get("task_status") == "error":
             return self._failed(self._error_code(response, "provider_processing_failed"))
         return ProviderTaskState(status="processing")
@@ -160,9 +163,12 @@ class YouCamClient:
         if not marker or not details:
             raise YouCamFailure("invalid_user_image", "YouCam could not use this user image.")
         try:
-            return base64.b64decode(encoded, validate=True), *details
+            image = base64.b64decode(encoded, validate=True)
         except ValueError:
             raise YouCamFailure("invalid_user_image", "YouCam could not use this user image.") from None
+        if not image or len(image) >= MAX_IMAGE_BYTES:
+            raise YouCamFailure("invalid_user_image", "YouCam could not use this user image.")
+        return image, *details
 
     def _upload_details(self, response: httpx.Response) -> tuple[str, str, dict[str, str]]:
         files = self._data(response).get("files")
@@ -180,9 +186,7 @@ class YouCamClient:
         return YouCamFailure(self._error_code(response, default), self._message(self._error_code(response, default)))
 
     def _error_code(self, response: httpx.Response, default: str) -> str:
-        error = self._error(response)
-        value = error.get("code", "") if isinstance(error, dict) else ""
-        code = value.lower() if isinstance(value, str) else ""
+        code = self._provider_error_code(response).lower()
         if "nsfw" in code or "safety" in code:
             return "provider_safety_rejection"
         if "ref" in code or "download" in code:
@@ -192,17 +196,25 @@ class YouCamClient:
         return default
 
     @staticmethod
-    def _error(response: httpx.Response) -> dict:
+    def _provider_error_code(response: httpx.Response) -> str:
         try:
             payload = response.json()
         except ValueError:
-            return {}
+            return ""
         if not isinstance(payload, dict):
-            return {}
+            return ""
         data = payload.get("data")
-        error = data.get("error") if isinstance(data, dict) else None
-        error = error if isinstance(error, dict) else payload.get("error")
-        return error if isinstance(error, dict) else {}
+        for container in (data, payload):
+            if not isinstance(container, dict):
+                continue
+            error = container.get("error")
+            if isinstance(error, dict) and isinstance(error.get("code"), str):
+                return error["code"]
+            if isinstance(error, str):
+                return error
+            if isinstance(container.get("error_code"), str):
+                return container["error_code"]
+        return ""
 
     @classmethod
     def _failed(cls, code: str) -> ProviderTaskState:

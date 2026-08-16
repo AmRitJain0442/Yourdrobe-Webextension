@@ -176,7 +176,7 @@ describe("profile store", () => {
     await expectFeetPreserved();
   });
 
-  it("repairs an image blob when FileReader fails and closes its validation bitmap", async () => {
+  it("keeps a valid image and metadata when FileReader fails", async () => {
     const close = vi.fn();
     await seedRawAsset("face_front", new Blob(["photo"], { type: "image/jpeg" }));
     await seedRawAsset("feet_front", new Blob(["feet"], { type: "image/jpeg" }));
@@ -189,10 +189,10 @@ describe("profile store", () => {
       readAsDataURL() { this.onerror?.(); }
     });
 
-    await expect(loadRequiredAssets(["face_front"])).rejects.toMatchObject({ role: "face_front" });
+    await expect(loadRequiredAssets(["face_front"])).rejects.toThrow("read failed");
     expect(close).toHaveBeenCalledOnce();
-    expect((await loadProfile())?.assets.face_front).toBeUndefined();
-    expect(await rawAsset("face_front")).toBeUndefined();
+    expect((await loadProfile())?.assets.face_front).toBeDefined();
+    expect(await rawAsset("face_front")).toBeDefined();
     await expectFeetPreserved();
   });
 
@@ -254,6 +254,15 @@ describe("profile store", () => {
     const uploads = await loadRequiredAssets(["face_front"]);
 
     expect(uploads[0].image_data_url).toBe("data:image/jpeg;base64,anBlZw==");
+    expect((await rawAsset("face_front"))?.type).toBe("image/webp");
+  });
+
+  it("keeps a valid WebP and metadata when transient conversion fails", async () => {
+    await saveAsset(face(new Blob(["webp"], { type: "image/webp" })));
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+
+    await expect(loadRequiredAssets(["face_front"])).rejects.toThrow("We could not process that image.");
+    expect((await loadProfile())?.assets.face_front).toBeDefined();
     expect((await rawAsset("face_front"))?.type).toBe("image/webp");
   });
 

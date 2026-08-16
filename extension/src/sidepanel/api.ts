@@ -2,6 +2,8 @@ import type { Product, ProductType, TryOnJob } from "../types";
 import type { ProfileAssetUpload, ProfileAttributes, RequirementKey } from "../profile/types";
 
 const baseUrl = "http://127.0.0.1:8001/v1";
+const requestTimeoutMs = 10_000;
+const batchTimeoutMs = 300_000;
 export type NormalizedProduct = Product & { id: string };
 export type Capabilities = {
   tryon_provider: "mock" | "youcam";
@@ -14,10 +16,10 @@ export class MissingProfileAssetsError extends Error {
   }
 }
 
-async function json<T>(path: string, init?: RequestInit): Promise<T> {
+async function json<T>(path: string, init?: RequestInit, timeoutMs = requestTimeoutMs): Promise<T> {
   const signal = init?.signal
-    ? AbortSignal.any([init.signal, AbortSignal.timeout(10_000)])
-    : AbortSignal.timeout(10_000);
+    ? AbortSignal.any([init.signal, AbortSignal.timeout(timeoutMs)])
+    : AbortSignal.timeout(timeoutMs);
   let response: Response;
   let raw: string;
   try {
@@ -86,7 +88,7 @@ export async function startDemo(
       assets,
       cloud_consent: cloudConsent,
     }),
-  });
+  }, batchTimeoutMs);
   return { products: normalized.products, jobs: batch.jobs };
 }
 

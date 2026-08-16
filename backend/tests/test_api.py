@@ -124,6 +124,13 @@ class ApiJourneyTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"]["code"], "live_consent_required")
 
+    def test_live_batch_rejects_coerced_cloud_consent(self) -> None:
+        main.youcam = FakeYouCam()
+        product_id = self.create_product("unused", "dress")
+        body = self.live_batch(product_id)
+        body["cloud_consent"] = "true"
+        self.assertEqual(self.client.post("/v1/tryons/batch", json=body).status_code, 422)
+
     def test_live_batch_reports_missing_body_asset(self) -> None:
         main.youcam = FakeYouCam()
         product_id = self.create_product("unused", "dress")
@@ -138,9 +145,13 @@ class ApiJourneyTest(unittest.TestCase):
     def test_unsupported_live_category_is_failed_without_provider_call(self) -> None:
         provider = FakeYouCam()
         main.youcam = provider
-        job = self.client.post("/v1/tryons/batch", json=self.makeup_batch()).json()["jobs"][0]
+        body = self.makeup_batch()
+        body["cloud_consent"] = False
+        job = self.client.post("/v1/tryons/batch", json=body).json()["jobs"][0]
         self.assertEqual(job["status"], "failed")
         self.assertEqual(job["error_code"], "unsupported_live_category")
+        self.assertEqual(job["error_message"], "Live try-on is not available for this product type.")
+        self.assertFalse(job["mock"])
         self.assertEqual(provider.created, [])
 
     def test_live_provider_failure_is_stored_without_mock(self) -> None:
@@ -149,11 +160,21 @@ class ApiJourneyTest(unittest.TestCase):
         main.youcam = provider
         product_id = self.create_product("unused", "top")
         response = self.client.post("/v1/tryons/batch", json=self.live_batch(product_id))
-        job_id = response.json()["jobs"][0]["job_id"]
+        immediate = response.json()["jobs"][0]
+        self.assertEqual(immediate["error_message"], "YouCam is rate limited. Please try again later.")
+        self.assertFalse(immediate["mock"])
+        job_id = immediate["job_id"]
         result = self.client.get(f"/v1/tryons/{job_id}").json()
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["error_code"], "youcam_rate_limited")
         self.assertFalse(result["mock"])
+
+    def test_live_batch_rejects_unbounded_asset_data(self) -> None:
+        main.youcam = FakeYouCam()
+        product_id = self.create_product("unused", "dress")
+        body = self.live_batch(product_id)
+        body["assets"][1]["image_data_url"] = "x" * 14_000_001
+        self.assertEqual(self.client.post("/v1/tryons/batch", json=body).status_code, 422)
 
     def create_profile(self, session_id: str, roles: tuple[str, ...] = ("upper_body_front",)) -> str:
         response = self.client.post("/v1/profiles", json={
