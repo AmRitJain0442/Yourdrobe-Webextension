@@ -298,7 +298,8 @@ describe("App", () => {
       job_id: "job", product_id: "product", product_type: "dress",
     }));
     expect(host.textContent).toContain("Active outfit");
-    expect(host.textContent).toContain("Saved only in this browser on this device.");
+    expect(host.textContent).toContain("Saved browser-locally on this device.");
+    expect(host.textContent).toContain("uploads this saved image to Perfect Corp");
   });
 
   it("accepts a PNG completed-live image from the local backend", async () => {

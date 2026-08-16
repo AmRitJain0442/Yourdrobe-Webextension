@@ -71,7 +71,7 @@ $env:YOUCAM_API_KEYS='first-api-key,second-api-key'
 - Sequential raster edits can alter previously rendered items, so a later preview is not a lossless edit of the earlier one.
 - Shoes and accessories remain future provider-specific integrations.
 - Provider result URLs expire after two hours. Saving a rendered result can fail after its temporary provider URL expires; unsaved live results remain available only for the current side-panel session.
-- Profile photos, active outfits, and profile metadata remain local to this Chrome browser on this device.
+- Profile photos, active outfits, and profile metadata are stored locally in this Chrome browser on this device. Using an active outfit for another live preview uploads its saved image to Perfect Corp.
 
 See the official [Clothes V3 API](https://docs.perfectcorp.com/reference/ai_clothes/section/overview) and [file retention period](https://docs.perfectcorp.com/develop/file_retention_period) documentation.
 

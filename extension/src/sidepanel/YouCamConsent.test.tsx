@@ -31,6 +31,9 @@ describe("YouCamConsent", () => {
     expect(host.textContent).toContain("Perfect Corp");
     expect(host.textContent).toContain("up to 30 days");
     expect(host.textContent).toContain("download URL is temporary");
+    expect(host.textContent).toContain("Unless you choose Use as active outfit");
+    expect(host.textContent).toContain("stored browser-locally");
+    expect(host.textContent).toContain("uploaded to Perfect Corp");
     expect(accept.disabled).toBe(true);
     await act(async () => (host.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
     expect(accept.disabled).toBe(false);

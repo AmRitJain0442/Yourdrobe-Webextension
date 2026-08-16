@@ -297,7 +297,7 @@ function ActiveOutfitPanel({ outfit, busy, onReset }: { outfit: ActiveOutfit; bu
     <h2 id="active-outfit-heading">Active outfit</h2>
     <img src={outfit.image_data_url} alt={`Active outfit: ${outfit.metadata.product_title}`} />
     <div><h3>{outfit.metadata.product_title}</h3><p>Product type: {outfit.metadata.product_type}</p></div>
-    <p>Saved only in this browser on this device.</p>
+    <p>Saved browser-locally on this device. Using it for another live preview uploads this saved image to Perfect Corp.</p>
     <a href={outfit.metadata.product_url} target="_blank" rel="noreferrer">View original product</a>
     <button className="secondary" disabled={busy} onClick={onReset}>Reset to original profile photo</button>
   </article>;
