@@ -52,6 +52,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .product-search { margin-top: 16px; }
 .product-search p { margin-bottom: 0; }
 .active-outfit img { width: 100%; height: min(60vh, 560px); max-height: none; object-fit: contain; background: var(--surface-muted); }
+.card-fan-carousel { width: 100%; overflow: hidden; padding: 8px 0 16px; border: 0; background: transparent; }
+.fan-layout { position: relative; display: flex; width: 100%; height: min(58vh, 390px); align-items: flex-start; justify-content: center; }
+.fan-card { position: absolute; width: min(48vw, 210px); aspect-ratio: 3 / 4; overflow: hidden; padding: 0; border: 3px solid transparent; border-radius: 14px; background: var(--surface); box-shadow: 0 12px 30px rgb(43 32 35 / 20%); transform-origin: 50% 100%; }
+.fan-card:hover { background: var(--surface); }
+.fan-card[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), 0 14px 34px rgb(43 32 35 / 28%); }
+.fan-card img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.fan-controls { position: relative; z-index: 30; display: flex; align-items: center; justify-content: center; gap: 14px; }
+.fan-arrow { width: 44px; min-height: 44px; padding: 11px; border: 1px solid var(--border); border-radius: 50%; background: color-mix(in srgb, var(--surface) 88%, transparent); color: var(--text-muted); }
+.fan-arrow svg { width: 20px; height: 20px; }
+.fan-count { min-width: 56px; color: var(--text-muted); text-align: center; font-size: 12px; font-weight: 800; }
 .preview-strip .product:not(.row) img { height: min(52vh, 420px); max-height: none; }
 .active-outfit h2, .active-outfit h3, .active-outfit p, .outfit-message { margin-top: 0; }
 .outfit-items { display: grid; gap: 8px; margin: 10px 0; padding: 0; list-style: none; }
