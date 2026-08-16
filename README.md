@@ -58,28 +58,33 @@ $env:YOUCAM_API_KEYS='first-api-key,second-api-key'
 ## Live YouCam clothing previews and privacy
 
 - Live YouCam supports clothing only: top, outerwear, bottom, and dress.
+- Every live clothing type requires a front full-body profile photo when starting from the original profile photo.
 - Unsupported categories show a failure in live mode.
 - `Mock AI preview` appears only when no `YOUCAM_API_KEYS` are configured.
 - Once keys are configured, provider or product-image failures remain failures and never fall back to mock imagery.
 - The first live run requires separate Perfect Corp cloud-processing consent in addition to local profile consent.
 - Profile creation remains file-upload-only; guided camera capture is not implemented.
 - Required profile and retailer product images are sent to Perfect Corp for live processing. Perfect Corp may retain uploaded and generated assets for up to 30 days.
-- Generated result URLs expire after two hours. Yourdrobe does not persist them: live results remain available only for the current side-panel session.
-- Profile photos remain browser-local in Chrome; profile metadata remains in `chrome.storage.local`.
+- A completed live preview can be saved with **Use as active outfit**. Yourdrobe downloads and stores one rendered image browser-locally; it does not store the provider result URL.
+- Later live clothing previews use the active outfit as their source. Products in one batch are alternatives, not an automatic composition chain: save one result, then start a later preview to compose it.
+- **Reset to original profile photo** removes the active outfit. Deleting the complete profile removes it too.
+- Sequential raster edits can alter previously rendered items, so a later preview is not a lossless edit of the earlier one.
+- Shoes and accessories remain future provider-specific integrations.
+- Provider result URLs expire after two hours. Saving a rendered result can fail after its temporary provider URL expires; unsaved live results remain available only for the current side-panel session.
+- Profile photos, active outfits, and profile metadata remain local to this Chrome browser on this device.
 
 See the official [Clothes V3 API](https://docs.perfectcorp.com/reference/ai_clothes/section/overview) and [file retention period](https://docs.perfectcorp.com/develop/file_retention_period) documentation.
 
 ## Manual real-key smoke test
 
-This is a manual check only. It consumes provider units and is never run in CI.
+This is a manual check only. It consumes provider units and is never run automatically.
 
 1. In a private shell, configure one real key using the live-mode setup above and start the backend.
 2. Build or reload the unpacked extension.
-3. Open a supported top or dress listing.
-4. Upload the required profile file and accept cloud processing when prompted.
-5. Confirm the result is labelled `YouCam AI preview` and the source listing remains accessible.
-6. Repeat with an intentionally invalid first key followed by the valid key in `YOUCAM_API_KEYS`; confirm the valid key succeeds without exposing either key.
-7. Confirm an invalid product image shows a failure and never `Mock AI preview`.
+3. Open a supported top listing, upload the required front full-body profile file, and accept cloud processing when prompted.
+4. Confirm the result is labelled `YouCam AI preview`, then select **Use as active outfit**.
+5. Open a supported bottom listing and confirm its live preview runs from the saved active outfit.
+6. Select **Reset to original profile photo** and confirm the active outfit is removed.
 
 ## Automated verification
 
@@ -91,7 +96,8 @@ backend\.venv\Scripts\python.exe -m unittest backend.tests.test_youcam backend.t
 npm.cmd --prefix extension test
 npm.cmd --prefix extension run build
 git diff --check
+git diff --check e19aa3e..HEAD
 git status --short --branch
 ```
 
-Expected: both backend modules pass, all extension tests pass, the production build succeeds, `git diff --check` prints nothing, and only the intended documentation change is present before commit.
+Expected: both backend modules pass, all extension tests pass, the production build succeeds, both diff checks print nothing, and only the intended documentation change is present before commit.
