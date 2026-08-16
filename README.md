@@ -18,10 +18,10 @@ npm.cmd --prefix extension run build
 
 ### Mock mode (default)
 
-To force mock mode, including when `backend/.env` has keys, set an empty process value before starting or restarting Uvicorn. It takes precedence without changing the local file:
+To force mock mode, including when `backend/.env` has keys, set a comma-only process value before starting or restarting Uvicorn. It stays present in Windows PowerShell 5.1, takes precedence, and parses as zero keys without changing the local file:
 
 ```powershell
-$env:YOUCAM_API_KEYS=''
+$env:YOUCAM_API_KEYS=','
 $env:PYTHONPATH='backend'
 backend/.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8001
 ```
