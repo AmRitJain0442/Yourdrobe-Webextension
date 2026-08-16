@@ -86,6 +86,23 @@ class YouCamClientTest(unittest.TestCase):
             "garment_category": "full_body",
         })
 
+    def test_uploads_source_and_creates_shoes_task(self) -> None:
+        started = self.client.create_shoes_task(
+            "data:image/jpeg;base64,cGhvdG8=", "https://images.example/shoes.jpg", "female",
+        )
+        self.assertEqual(started, StartedTask(task_id="provider-task", key_index=0, task_kind="shoes"))
+        self.assertEqual(self.requests[0][0:2], ("POST", "/s2s/v2.0/file/shoes"))
+        self.assertEqual(self.requests[2][0:2], ("POST", "/s2s/v2.0/task/shoes"))
+        self.assertEqual(self.requests[2][3], {
+            "src_file_id": "source-file", "ref_file_url": "https://images.example/shoes.jpg",
+            "gender": "female", "style": "random",
+        })
+
+    def test_polls_shoes_task_on_shoes_endpoint(self) -> None:
+        self.responses = [httpx.Response(200, json={"data": {"task_status": "processing"}})]
+        self.assertEqual(self.client.get_task("provider-task", 0, "shoes"), ProviderTaskState(status="processing"))
+        self.assertEqual(self.requests[0][0:2], ("GET", "/s2s/v2.0/task/shoes/provider-task"))
+
     def test_rotates_after_retryable_creation_failure(self) -> None:
         self.responses = [
             httpx.Response(401),

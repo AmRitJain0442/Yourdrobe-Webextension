@@ -16,7 +16,8 @@ class FakeYouCam:
     def __init__(self) -> None:
         self.enabled = True
         self.created: list[tuple[str, str, str]] = []
-        self.polled: list[tuple[str, int]] = []
+        self.created_shoes: list[tuple[str, str, str]] = []
+        self.polled: list[tuple[str, int, str]] = []
         self.failure: YouCamFailure | None = None
         self.download_failure: YouCamFailure | None = None
 
@@ -26,8 +27,14 @@ class FakeYouCam:
             raise self.failure
         return StartedTask("provider-task", 1)
 
-    def get_task(self, task_id: str, key_index: int) -> ProviderTaskState:
-        self.polled.append((task_id, key_index))
+    def create_shoes_task(self, source: str, reference: str, gender: str) -> StartedTask:
+        self.created_shoes.append((source, reference, gender))
+        if self.failure:
+            raise self.failure
+        return StartedTask("provider-shoes-task", 1, "shoes")
+
+    def get_task(self, task_id: str, key_index: int, task_kind: str = "clothes") -> ProviderTaskState:
+        self.polled.append((task_id, key_index, task_kind))
         return ProviderTaskState("completed", "https://provider.example/result.jpg")
 
     def download_result(self, url: str) -> tuple[bytes, str]:
@@ -96,7 +103,7 @@ class ApiJourneyTest(unittest.TestCase):
         main.youcam = FakeYouCam()
         self.assertEqual(self.client.get("/v1/capabilities").json(), {
             "tryon_provider": "youcam",
-            "live_product_types": ["top", "outerwear", "bottom", "dress"],
+            "live_product_types": ["top", "outerwear", "bottom", "dress", "footwear"],
         })
 
     def test_live_dress_creates_and_polls_provider_job(self) -> None:
@@ -110,7 +117,7 @@ class ApiJourneyTest(unittest.TestCase):
         self.assertEqual(result["result_url"], "https://provider.example/result.jpg")
         self.assertFalse(result["mock"])
         self.assertEqual(provider.created[0][2], "full_body")
-        self.assertEqual(provider.polled, [("provider-task", 1)])
+        self.assertEqual(provider.polled, [("provider-task", 1, "clothes")])
         self.assertNotIn("cGhvdG8", repr(jobs[job_id]))
         self.assertNotIn("Bearer", repr(jobs[job_id]))
 
@@ -196,6 +203,23 @@ class ApiJourneyTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(provider.created[-1][0], source)
             self.assertEqual(provider.created[-1][2], garment)
+
+    def test_live_footwear_uses_shoes_api_with_active_outfit(self) -> None:
+        provider = FakeYouCam()
+        main.youcam = provider
+        product_id = self.create_product("unused", "footwear")
+        products[product_id]["metadata"] = {"gender": "female"}
+        body = self.live_batch(product_id)
+        body["outfit_base_image_data_url"] = "data:image/jpeg;base64,b3V0Zml0"
+
+        response = self.client.post("/v1/tryons/batch", json=body)
+        self.assertEqual(response.status_code, 200)
+        job_id = response.json()["jobs"][0]["job_id"]
+        self.assertEqual(provider.created_shoes, [(
+            "data:image/jpeg;base64,b3V0Zml0", "https://images.example/footwear.jpg", "female",
+        )])
+        self.assertEqual(self.client.get(f"/v1/tryons/{job_id}").json()["status"], "completed")
+        self.assertEqual(provider.polled[-1], ("provider-shoes-task", 1, "shoes"))
 
     def test_active_outfit_is_the_shared_source_for_a_mixed_live_batch(self) -> None:
         provider = FakeYouCam()

@@ -10,19 +10,23 @@ from dotenv import load_dotenv
 
 
 API_BASE = "https://yce-api-01.makeupar.com"
-FILE_PATH = "/s2s/v2.0/file/cloth-v3"
-TASK_PATH = "/s2s/v2.0/task/cloth-v3"
+CLOTH_FILE_PATH = "/s2s/v2.0/file/cloth-v3"
+CLOTH_TASK_PATH = "/s2s/v2.0/task/cloth-v3"
+SHOES_FILE_PATH = "/s2s/v2.0/file/shoes"
+SHOES_TASK_PATH = "/s2s/v2.0/task/shoes"
 RETRYABLE_HTTP = {401, 403, 429}
 PROVIDER_TIMEOUT_SECONDS = 5.0
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 GarmentCategory = Literal["upper_body", "lower_body", "full_body"]
+TaskKind = Literal["clothes", "shoes"]
 
 
 @dataclass(frozen=True)
 class StartedTask:
     task_id: str
     key_index: int
+    task_kind: TaskKind = "clothes"
 
 
 @dataclass(frozen=True)
@@ -68,17 +72,39 @@ class YouCamClient:
         reference_url: str,
         garment_category: GarmentCategory,
     ) -> StartedTask:
+        if garment_category not in ("upper_body", "lower_body", "full_body"):
+            raise YouCamFailure("provider_processing_failed", "YouCam could not create this preview.")
+        return self._create_task(
+            source_data_url, reference_url, CLOTH_FILE_PATH, CLOTH_TASK_PATH,
+            {"garment_category": garment_category}, "clothes",
+        )
+
+    def create_shoes_task(self, source_data_url: str, reference_url: str, gender: str) -> StartedTask:
+        if gender not in ("female", "male"):
+            raise YouCamFailure("provider_processing_failed", "Choose a shoe preview model.")
+        return self._create_task(
+            source_data_url, reference_url, SHOES_FILE_PATH, SHOES_TASK_PATH,
+            {"gender": gender, "style": "random"}, "shoes",
+        )
+
+    def _create_task(
+        self,
+        source_data_url: str,
+        reference_url: str,
+        file_path: str,
+        task_path: str,
+        parameters: dict[str, str],
+        task_kind: TaskKind,
+    ) -> StartedTask:
         image, content_type, extension = self._image(source_data_url)
         if not self._is_https(reference_url):
             raise YouCamFailure("invalid_product_image", "YouCam could not use this product image.")
-        if garment_category not in ("upper_body", "lower_body", "full_body"):
-            raise YouCamFailure("provider_processing_failed", "YouCam could not create this preview.")
         all_rate_limited = True
         for key_index, key in enumerate(self._keys):
             headers = {"Authorization": f"Bearer {key}"}
             try:
                 metadata = self._client.post(
-                    f"{API_BASE}{FILE_PATH}", headers=headers, json={"files": [{
+                    f"{API_BASE}{file_path}", headers=headers, json={"files": [{
                         "content_type": content_type,
                         "file_name": f"source.{extension}",
                         "file_size": len(image),
@@ -96,8 +122,8 @@ class YouCamClient:
                     continue
                 if uploaded.is_error:
                     raise YouCamFailure("invalid_user_image", "YouCam could not use this user image.")
-                created = self._client.post(f"{API_BASE}{TASK_PATH}", headers=headers, json={
-                    "src_file_id": upload[0], "ref_file_url": reference_url, "garment_category": garment_category,
+                created = self._client.post(f"{API_BASE}{task_path}", headers=headers, json={
+                    "src_file_id": upload[0], "ref_file_url": reference_url, **parameters,
                 })
                 if self._retryable(created):
                     all_rate_limited = all_rate_limited and created.status_code == 429
@@ -106,7 +132,7 @@ class YouCamClient:
                     raise self._failure_from_response(created, "invalid_product_image")
                 task_id = self._data(created).get("task_id")
                 if isinstance(task_id, str) and task_id.strip():
-                    return StartedTask(task_id.strip(), key_index)
+                    return StartedTask(task_id.strip(), key_index, task_kind)
                 raise YouCamFailure("provider_processing_failed", "YouCam could not create this preview.")
             except httpx.RequestError:
                 all_rate_limited = False
@@ -115,12 +141,15 @@ class YouCamClient:
             raise YouCamFailure("youcam_rate_limited", "YouCam is rate limited. Please try again later.")
         raise YouCamFailure("youcam_keys_exhausted", "YouCam is temporarily unavailable.")
 
-    def get_task(self, task_id: str, key_index: int) -> ProviderTaskState:
+    def get_task(self, task_id: str, key_index: int, task_kind: TaskKind = "clothes") -> ProviderTaskState:
         if not 0 <= key_index < len(self._keys):
+            return self._failed("provider_processing_failed")
+        task_path = CLOTH_TASK_PATH if task_kind == "clothes" else SHOES_TASK_PATH if task_kind == "shoes" else None
+        if task_path is None:
             return self._failed("provider_processing_failed")
         try:
             response = self._client.get(
-                f"{API_BASE}{TASK_PATH}/{task_id}", headers={"Authorization": f"Bearer {self._keys[key_index]}"},
+                f"{API_BASE}{task_path}/{task_id}", headers={"Authorization": f"Bearer {self._keys[key_index]}"},
             )
         except httpx.RequestError:
             return ProviderTaskState(status="processing")

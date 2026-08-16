@@ -114,12 +114,13 @@ PRODUCT_REQUIREMENTS = {
     "ring": (("full_body_front",),),
     "footwear": (("full_body_front",),),
 }
-LIVE_TYPES = ["top", "outerwear", "bottom", "dress"]
+LIVE_TYPES = ["top", "outerwear", "bottom", "dress", "footwear"]
 LIVE_MAPPING = {
     "top": ("full_body_front", "upper_body"),
     "outerwear": ("full_body_front", "upper_body"),
     "bottom": ("full_body_front", "lower_body"),
     "dress": ("full_body_front", "full_body"),
+    "footwear": ("full_body_front", "shoes"),
 }
 
 
@@ -263,7 +264,12 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
         else:
             try:
                 source = body.outfit_base_image_data_url or asset_by_role[mapping[0]]
-                started = youcam.create_clothes_task(source, product["image_url"], mapping[1])
+                if product["product_type"] == "footwear":
+                    started = youcam.create_shoes_task(
+                        source, product["image_url"], product.get("metadata", {}).get("gender", ""),
+                    )
+                else:
+                    started = youcam.create_clothes_task(source, product["image_url"], mapping[1])
             except YouCamFailure as failure:
                 job = {
                     "job_id": job_id,
@@ -278,6 +284,7 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
                     "product_id": product_id,
                     "provider_task_id": started.task_id,
                     "provider_key_index": started.key_index,
+                    "provider_task_kind": started.task_kind,
                     "mock": False,
                 }
         remember(jobs, job_id, job)
@@ -326,7 +333,9 @@ def get_tryon(job_id: str) -> dict:
             "result_url": job["result_url"],
             "mock": False,
         }
-    state: ProviderTaskState = youcam.get_task(job["provider_task_id"], job["provider_key_index"])
+    state: ProviderTaskState = youcam.get_task(
+        job["provider_task_id"], job["provider_key_index"], job.get("provider_task_kind", "clothes"),
+    )
     if state.status == "processing":
         return {"job_id": job_id, "product_id": job["product_id"], "status": "processing", "progress": 50, "mock": False}
     if state.status == "completed":
