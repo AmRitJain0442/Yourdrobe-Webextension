@@ -72,16 +72,16 @@ The side panel can search Amazon India, Amazon US, Flipkart, or Nykaa for you. C
 
 ## Live previews and privacy
 
-- Live YouCam supports top, outerwear, bottom, and dress through Clothes V3, plus footwear through the separate Shoes API.
-- Google Vertex AI image editing supports makeup, eyewear, headwear, earrings, necklaces, belts, bags, watches, bracelets, and rings while preserving the current full outfit.
+- Live YouCam supports top, outerwear, bottom, and dress through Clothes V3, footwear through the Shoes API, and caps or hats through the Hat API.
+- Google Vertex AI is used only to generate profile views. It is not used for product try-on previews.
 - Profile creation accepts one clear full-body upload. Google Vertex AI generates front, left, and right face photos plus white-background front and side full-body photos at 2K resolution.
 - Generation makes five Vertex AI image requests. Review all five AI-generated views before saving because unseen angles, identity details, and body proportions can be inaccurate.
 - Yourdrobe does not ask for body measurements or clothing sizes.
 - Live clothing uses the front full-body profile photo when starting from the original profile photo.
-- All 15 recognized product types have a per-item live preview path. Unrecognized products first ask the user to choose a product type.
-- `Mock AI preview` appears only when neither YouCam nor Google Vertex AI is configured.
+- Six recognized product types have a YouCam live preview path: headwear, top, outerwear, dress, bottom, and footwear. Unrecognized products first ask the user to choose a product type.
+- `Mock AI preview` appears only when YouCam is not configured.
 - Once keys are configured, provider or product-image failures remain failures and never fall back to mock imagery.
-- The first live run requires separate cloud-processing consent in addition to local profile consent. The consent screen identifies Perfect Corp for clothing and shoes and Google Vertex AI for other products.
+- The first live run requires separate cloud-processing consent in addition to local profile consent. Product preview images are sent to Perfect Corp; Google consent is limited to profile generation.
 - Profile creation remains file-upload-only; guided camera capture is not implemented. The source photo is sent through the local backend to Google Vertex AI only after explicit consent, and the backend does not persist it.
 - Required profile or active-outfit images and retailer product images are sent to the selected provider for live processing. Perfect Corp may retain uploaded and generated assets for up to 30 days.
 - A completed live preview can be saved with **Add this to active outfit**. Yourdrobe downloads the rendered image browser-locally; it does not store the provider result URL.
@@ -90,15 +90,15 @@ The side panel can search Amazon India, Amazon US, Flipkart, or Nykaa for you. C
 - Up to 50 compiled versions are retained without silently deleting older outfits. **Reset to original profile photo** explicitly clears the active outfit, selected products, and compiled history.
 - Later live previews use the active outfit as their source. Select one product card at a time, save its result, then select the next product to compose it.
 - The active outfit is shown as a large preview. New product and generated preview choices use a horizontal scrolling gallery.
-- Shoe cards ask for a Women or Men preview model and expose **Try these shoes**. The Shoes API uses the active outfit image when one is saved, otherwise it uses the front full-body profile photo.
-- Makeup, eyewear, headwear, earrings, necklaces, belts, bags, watches, bracelets, and rings use Google Vertex AI image editing and can be saved to the active outfit after a successful preview.
+- Shoe and hat cards ask for a Women or Men preview model. Their YouCam APIs use the active outfit image when one is saved, otherwise they use the front full-body profile photo.
+- Sunglasses are not sent to Google. Perfect Corp provides eyewear through a separate 3D web module that requires digitized eyewear SKUs, so retailer-image sunglasses preview is not integrated yet.
 - **Finalize outfit in this tab** visits each selected product in the current tab and uses its visible Add to Cart or Add to Bag control. After every item is added, that same tab finishes on the last product's retailer cart. If a product requires a size, colour, sign-in, CAPTCHA, or another choice, the sequence stops on that product for manual completion and does not report it as added.
 - **Reset to original profile photo** removes the active outfit. Deleting the complete profile removes it too.
 - Sequential raster edits can alter previously rendered items, so a later preview is not a lossless edit of the earlier one.
-- YouCam result URLs are temporary. Google-generated preview bytes stay only in backend memory for the current backend process. Unsaved live results remain available only for the current side-panel session.
+- YouCam result URLs are temporary. Unsaved live results remain available only for the current side-panel session.
 - Profile photos, active outfits, and profile metadata are stored locally in this Chrome browser on this device. Using an active outfit for another live preview uploads its saved image to the selected cloud provider.
 
-See the official [Clothes V3 API](https://docs.perfectcorp.com/reference/ai_clothes/section/overview), [Shoes API](https://docs.perfectcorp.com/reference/ai_shoes), and [file retention period](https://docs.perfectcorp.com/develop/file_retention_period) documentation.
+See the official [Clothes V3 API](https://docs.perfectcorp.com/reference/ai_clothes/section/overview), [Shoes API](https://docs.perfectcorp.com/reference/ai_shoes), [Hat API](https://docs.perfectcorp.com/reference/ai_hat), and [file retention period](https://docs.perfectcorp.com/develop/file_retention_period) documentation.
 
 ## Manual real-key smoke test
 
@@ -109,7 +109,7 @@ This is a manual check only. It consumes provider units and is never run automat
 3. Open a supported top listing, upload one full-body source photo, consent to Google Vertex AI processing, and confirm five white-background generated previews appear before anything is saved.
 4. Save the generated profile, accept cloud processing when prompted, confirm the result is labelled `Live AI preview`, then select **Add this to active outfit**.
 5. Search for a bottom such as baggy jeans in the side panel and confirm **Try this bottom** appears under each result and generates only the selected product's preview from the saved active outfit.
-6. Search for a bag or accessory, select its **Try this ...** action, save the successful preview, and confirm the next preview builds from it.
+6. Search for a cap or hat, choose a preview model, select **Try this headwear**, save the successful preview, and confirm the next preview builds from it.
 7. Generate and save at least two compiled outfits. Use the Wardrobe arrows and confirm the large active image and selected-product list change together.
 8. Select one saved version, then choose **Finalize outfit in this tab**. Confirm only that version's products are processed and the current tab finishes on the last product's retailer cart. Confirm any product needing a size or other choice stops the sequence on its product page.
 9. Select **Reset to original profile photo** and confirm the active outfit, compiled carousel, and selected-product list are removed.
