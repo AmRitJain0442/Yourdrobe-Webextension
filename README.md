@@ -184,3 +184,160 @@ With no keys configured the backend serves the identical job contract with `mock
 the entire flow be developed and tested without spending provider units. The moment keys are
 present, mock is gone: a provider failure stays a failure and is reported as one. Yourdrobe never
 quietly serves a fake preview while pretending it is real.
+
+---
+
+## System architecture
+
+```mermaid
+flowchart TB
+    subgraph browser["Chrome browser, on your device"]
+        SP["Side panel<br/>React 19 + TypeScript"]
+        SW["Service worker<br/>cart automation"]
+        CS["Content scripts<br/>Amazon, Flipkart, Nykaa"]
+        IDB[("IndexedDB<br/>profile and outfit image blobs")]
+        CSL[("chrome.storage.local<br/>metadata and consent")]
+    end
+
+    subgraph backend["Local backend, 127.0.0.1:8001"]
+        API["FastAPI<br/>backend/app/main.py"]
+        YC["YouCam client<br/>backend/app/youcam.py"]
+        KEYS[["YOUCAM_API_KEYS<br/>never leave this process"]]
+    end
+
+    subgraph perfectcorp["Perfect Corp YouCam"]
+        CLOTH["Clothes V3 API"]
+        SHOES["Shoes API"]
+        HAT["Hat API"]
+        S3[("Result storage<br/>expiring URLs")]
+    end
+
+    CS -->|"extracted product cards"| SP
+    SP <-->|"blobs"| IDB
+    SP <-->|"metadata"| CSL
+    SP -->|"try-on request"| API
+    SP -->|"finalize outfit"| SW
+    SW -->|"add to cart"| CS
+    API --> YC
+    KEYS -.-> YC
+    YC --> CLOTH
+    YC --> SHOES
+    YC --> HAT
+    CLOTH --> S3
+    SHOES --> S3
+    HAT --> S3
+    S3 -.->|"re-hosted through the backend"| YC
+```
+
+The local backend exists for one reason: it is the trust boundary. API keys are read from the
+environment into the backend process and are never bundled into the extension, never sent to the
+browser, and never returned by any endpoint. The extension only ever talks to `127.0.0.1:8001`.
+
+---
+
+## Workflows
+
+### Try-on request lifecycle
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as Shopper
+    participant SP as Side panel
+    participant API as Local backend
+    participant YC as YouCam API
+
+    U->>SP: Chooses "Try this top" on one card
+    SP->>API: GET /v1/capabilities
+    API-->>SP: Provider and live product types
+    Note over SP: First live run asks for<br/>cloud processing consent
+    SP->>API: POST /v1/sessions
+    SP->>API: POST /v1/profiles
+    SP->>API: POST /v1/products/normalize
+    Note over API: Rejects any product URL whose host<br/>does not match its claimed platform
+    SP->>API: POST /v1/tryons/batch
+
+    API->>YC: POST file metadata
+    YC-->>API: file_id and presigned upload request
+    API->>YC: PUT image bytes to presigned URL
+    API->>YC: POST task with src_file_id and ref_file_url
+    YC-->>API: task_id
+    API-->>SP: Job queued
+
+    loop Every 2s, up to 40 polls, 80s deadline
+        SP->>API: GET /v1/tryons/{job_id}
+        API->>YC: GET task status for the stored task kind
+        YC-->>API: processing
+        API-->>SP: processing
+    end
+
+    YC-->>API: success with result URL
+    API-->>SP: completed
+    SP->>API: GET /v1/tryons/{job_id}/result-image
+    API->>YC: Stream from the allowlisted result host
+    API-->>SP: Verified image bytes
+    SP->>U: Preview, ready to save to the outfit
+```
+
+### Outfit composition loop
+
+```mermaid
+flowchart LR
+    P["Profile photo<br/>full_body_front"] --> T1["YouCam<br/>Clothes V3<br/>upper_body"]
+    T1 --> R1["Look v1<br/>wearing the top"]
+    R1 --> T2["YouCam<br/>Clothes V3<br/>lower_body"]
+    T2 --> R2["Look v2<br/>top and bottom"]
+    R2 --> T3["YouCam<br/>Shoes API"]
+    T3 --> R3["Look v3<br/>plus footwear"]
+    R3 --> T4["YouCam<br/>Hat API"]
+    T4 --> R4["Look v4<br/>complete outfit"]
+
+    R1 -.-> W[("Wardrobe<br/>up to 50 saved looks")]
+    R2 -.-> W
+    R3 -.-> W
+    R4 -.-> W
+    W -.->|"select any version<br/>and continue from it"| T2
+```
+
+Every arrow from a look into the next YouCam call passes that look's saved bytes as
+`outfit_base_image_data_url`. Selecting an older version from the wardrobe restores both its
+image and its product list, so you can branch a different outfit from any point in the history.
+
+### YouCam task routing
+
+```mermaid
+flowchart TD
+    A["Product title from the listing"] --> B["classifyProductType()"]
+    B -->|"exactly one rule matches"| C{"Product type"}
+    B -->|"zero or several rules match"| D["unknown"]
+    D --> E["Ask the shopper to choose a type"]
+    E --> C
+
+    C -->|"top, outerwear"| F["Clothes V3<br/>garment_category=upper_body"]
+    C -->|"bottom"| G["Clothes V3<br/>garment_category=lower_body"]
+    C -->|"dress"| H["Clothes V3<br/>garment_category=full_body"]
+    C -->|"footwear"| I["Shoes API<br/>gender and style"]
+    C -->|"headwear"| J["Hat API<br/>gender and style"]
+    C -->|"any other type"| K["unsupported_live_category"]
+```
+
+### Finalize to cart
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Navigating: Finalize outfit in this tab
+    Navigating --> Loading: navigate the tab to the product URL
+    Loading --> Clicking: page load complete
+    Loading --> NeedsAttention: 20 second load timeout
+    Clicking --> NextItem: retailer add-to-cart control clicked
+    Clicking --> NeedsAttention: control missing, disabled, or gated
+    NextItem --> Navigating: products remain
+    NextItem --> Cart: every product added
+    Cart --> [*]: finish on the retailer cart
+    NeedsAttention --> [*]: stop and report the product by name
+```
+
+A product that needs a size, a colour, a sign in, or a CAPTCHA stops the sequence on its own
+page for you to finish by hand. Yourdrobe reports it as needing attention rather than counting
+it as added.
