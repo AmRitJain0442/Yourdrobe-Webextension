@@ -83,7 +83,10 @@ The side panel can search Amazon India, Amazon US, Flipkart, or Nykaa for you. C
 - The first live run requires separate Perfect Corp cloud-processing consent in addition to local profile consent.
 - Profile creation remains file-upload-only; guided camera capture is not implemented. The source photo is sent through the local backend to Google Vertex AI only after explicit consent, and the backend does not persist it.
 - Required profile and retailer product images are sent to Perfect Corp for live processing. Perfect Corp may retain uploaded and generated assets for up to 30 days.
-- A completed live preview can be saved with **Use as active outfit**. Yourdrobe downloads and stores one rendered image browser-locally; it does not store the provider result URL.
+- A completed live preview can be saved with **Add this to active outfit**. Yourdrobe downloads the rendered image browser-locally; it does not store the provider result URL.
+- Every compiled preview is preserved as a separate local outfit version. The active outfit remains large at the top, and the GSAP fan carousel underneath lets you compare and select saved versions before continuing or finalizing.
+- Selecting a carousel version restores both its rendered image and its product list. Later clothing previews build from that selected image, while accessory-only additions stay attached to the selected version.
+- Up to 50 compiled versions are retained without silently deleting older outfits. **Reset to original profile photo** explicitly clears the active outfit, selected products, and compiled history.
 - Later live clothing previews use the active outfit as their source. Select one product card at a time, save its result, then select the next product to compose it.
 - The active outfit is shown as a large preview. New product and generated preview choices use a horizontal scrolling gallery.
 - Shoe cards ask for a Women or Men preview model and expose **Try these shoes**. The Shoes API uses the active outfit image when one is saved, otherwise it uses the front full-body profile photo.
@@ -104,11 +107,26 @@ This is a manual check only. It consumes provider units and is never run automat
 1. In a private shell, configure one real key using the live-mode setup above and start the backend.
 2. Build or reload the unpacked extension.
 3. Open a supported top listing, upload one full-body source photo, consent to Google Vertex AI processing, and confirm five white-background generated previews appear before anything is saved.
-4. Save the generated profile, accept Perfect Corp processing when prompted, confirm the result is labelled `YouCam AI preview`, then select **Use as active outfit**.
+4. Save the generated profile, accept Perfect Corp processing when prompted, confirm the result is labelled `YouCam AI preview`, then select **Add this to active outfit**.
 5. Search for a bottom such as baggy jeans in the side panel and confirm **Try this bottom** appears under each result and generates only the selected product's preview from the saved active outfit.
 6. Search for an accessory, select **Add to outfit without preview**, and confirm it appears in the selected-product list without a failed preview.
-7. Select **Finalize outfit in this tab**. Confirm the current tab visits each directly addable product and finishes on the last product's retailer cart. Confirm any product needing a size or other choice stops the sequence on its product page.
-8. Select **Reset to original profile photo** and confirm the active outfit and selected-product list are removed.
+7. Generate and save at least two compiled outfits. Select each fan-carousel card and confirm the large active image and selected-product list change together.
+8. Select one saved version, then choose **Finalize outfit in this tab**. Confirm only that version's products are processed and the current tab finishes on the last product's retailer cart. Confirm any product needing a size or other choice stops the sequence on its product page.
+9. Select **Reset to original profile photo** and confirm the active outfit, compiled carousel, and selected-product list are removed.
+
+## Component structure and optional shadcn/Tailwind setup
+
+The extension already uses React and TypeScript, but it uses a small handwritten CSS system rather than Tailwind or shadcn. The integrated carousel lives at `extension/src/components/ui/card-fan-carousel.tsx`; keeping reusable UI in `src/components/ui` matches the shadcn alias convention, keeps vendored primitives separate from side-panel business logic, and makes a later CLI migration predictable. Its utility classes were translated into `extension/src/sidepanel/styles.css`, so Tailwind is not required for this feature.
+
+To adopt the upstream Tailwind/shadcn structure later, follow the official [shadcn Vite instructions](https://ui.shadcn.com/docs/installation/vite):
+
+```powershell
+npm.cmd --prefix extension install tailwindcss @tailwindcss/vite
+Set-Location extension
+npx.cmd shadcn@latest init
+```
+
+Then add the Tailwind Vite plugin, add `@import "tailwindcss";` to the global stylesheet, configure `@/*` to resolve to `./src/*` in TypeScript and Vite, and keep the CLI's UI alias pointed at `@/components/ui`. These steps are optional because the checked-in carousel is already styled and functional without them.
 
 ## Automated verification
 
