@@ -103,6 +103,14 @@ class YouCamClientTest(unittest.TestCase):
         self.assertEqual(self.client.get_task("provider-task", 0, "shoes"), ProviderTaskState(status="processing"))
         self.assertEqual(self.requests[0][0:2], ("GET", "/s2s/v2.0/task/shoes/provider-task"))
 
+    def test_maps_shoes_no_face_error_to_the_source_image(self) -> None:
+        self.responses = [httpx.Response(200, json={
+            "data": {"task_status": "error", "error": {"code": "error_no_face"}},
+        })]
+        self.assertEqual(self.client.get_task("provider-task", 0, "shoes"), ProviderTaskState(
+            status="failed", error_code="invalid_user_image", error_message="YouCam could not use this user image.",
+        ))
+
     def test_rotates_after_retryable_creation_failure(self) -> None:
         self.responses = [
             httpx.Response(401),

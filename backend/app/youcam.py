@@ -250,7 +250,7 @@ class YouCamClient:
             return "provider_safety_rejection"
         if "ref" in code or "download" in code:
             return "invalid_product_image"
-        if "src" in code or "pose" in code or "image" in code:
+        if "src" in code or "pose" in code or "image" in code or "face" in code:
             return "invalid_user_image"
         return default
 
