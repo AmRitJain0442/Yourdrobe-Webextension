@@ -63,6 +63,42 @@ describe("ProfileManager", () => {
     expect(host.textContent).toContain("FootwearPhoto needed");
   });
 
+  it("uploads a missing photo directly from profile management", async () => {
+    const { onChanged } = await renderManager(vi.fn(), vi.fn(), profile, null);
+    const upperBody = [...host.querySelectorAll<HTMLElement>(".profile-asset")]
+      .find((asset) => asset.textContent?.includes("Front upper-body photo"));
+    const input = upperBody?.querySelector('input[type="file"]') as HTMLInputElement | null;
+
+    expect(upperBody).toBeDefined();
+    expect(upperBody!.textContent).toContain("Add photo");
+    expect(input).not.toBeNull();
+
+    await act(async () => {
+      choose(input!, new File(["upper"], "upper.jpg", { type: "image/jpeg" }));
+      await Promise.resolve();
+    });
+
+    expect(prepareProfileImage).toHaveBeenCalledWith(input?.files?.[0], "upper_body_front");
+    expect(saveAsset).toHaveBeenCalledOnce();
+    expect(onChanged).toHaveBeenCalledOnce();
+  });
+
+  it("requires consent before enabling the first missing photo upload", async () => {
+    await renderManager(vi.fn(), vi.fn(), null, null);
+    const face = [...host.querySelectorAll<HTMLElement>(".profile-asset")]
+      .find((asset) => asset.textContent?.includes("Front face photo"));
+    const input = face?.querySelector('input[type="file"]') as HTMLInputElement | null;
+    const consent = host.querySelector('input[type="checkbox"]') as HTMLInputElement;
+
+    expect(face).toBeDefined();
+    expect(input).not.toBeNull();
+    expect(input!.disabled).toBe(true);
+
+    await act(async () => { consent.click(); });
+
+    expect(input!.disabled).toBe(false);
+  });
+
   it("assigns the legacy image to the selected role", async () => {
     const { onChanged } = await renderManager();
     expect(host.textContent).toContain("browser-local profile storage and per-run transmission");

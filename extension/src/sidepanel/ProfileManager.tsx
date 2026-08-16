@@ -51,6 +51,7 @@ export function ProfileManager({ profile, legacyImage, onChanged, onClose }: Pro
 
   async function replace(role: PhotoRole, file?: File) {
     if (!file) return;
+    if (!profile && !consent) { setError("Agree to browser-local storage and per-run transmission before saving this photo."); return; }
     await runMutation(async () => {
       await saveAsset(await prepareProfileImage(file, role));
       await onChanged();
@@ -100,12 +101,15 @@ export function ProfileManager({ profile, legacyImage, onChanged, onClose }: Pro
   return <section className="profile-manager" aria-busy={busy}>
     <div className="profile-heading"><h2>Manage your profile</h2><button type="button" className="secondary" disabled={busy} onClick={onClose}>Close</button></div>
     <div className="profile-completion">{categories.map(([requirement, label]) => <p key={requirement}>{label}<strong>{rolesForRequirement(requirement).some((role) => assets[role]) ? "Complete" : "Photo needed"}</strong></p>)}</div>
-    <div className="list">{roles.filter((role) => assets[role]).map((role) => <article className="profile-asset" key={role}>
-      <div><h3>{labels[role]}</h3><p>Updated {new Date(assets[role]!.updated_at).toLocaleDateString()}</p></div>
-      <label>Replace photo<input type="file" disabled={busy} accept="image/jpeg,image/png,image/webp" onChange={(event) => void replace(role, event.target.files?.[0])} /></label>
-      <button type="button" className="secondary" disabled={busy} onClick={() => void removeAsset(role)}>Delete photo</button>
-    </article>)}</div>
     {(legacyImage || !profile) && <label className="check"><input type="checkbox" disabled={busy} checked={consent} onChange={(event) => setConsent(event.target.checked)} />I agree to browser-local profile storage and per-run transmission of required photos and optional attributes to 127.0.0.1:8001.</label>}
+    <div className="list">{roles.map((role) => {
+      const asset = assets[role];
+      return <article className="profile-asset" key={role}>
+        <div><h3>{labels[role]}</h3>{asset ? <p>Updated {new Date(asset.updated_at).toLocaleDateString()}</p> : <p>Photo needed</p>}</div>
+        <label>{asset ? "Replace photo" : "Add photo"}<input type="file" disabled={busy || (!profile && !consent)} accept="image/jpeg,image/png,image/webp" onChange={(event) => void replace(role, event.target.files?.[0])} /></label>
+        {asset && <button type="button" className="secondary" disabled={busy} onClick={() => void removeAsset(role)}>Delete photo</button>}
+      </article>;
+    })}</div>
     {legacyImage && <article className="profile-asset legacy-image"><h3>Unclassified existing photo</h3><img src={legacyImage} alt="Unclassified existing photo" /><label>Photo role<select disabled={busy} value={legacyRole} onChange={(event) => setLegacyRole(event.target.value as PhotoRole)}>{roles.map((role) => <option key={role} value={role}>{labels[role]}</option>)}</select></label><button type="button" disabled={busy} onClick={() => void assignLegacy()}>Assign photo</button><button type="button" className="secondary" disabled={busy} onClick={() => void removeLegacy()}>Delete old photo</button></article>}
     <form onSubmit={(event) => void save(event)}><h3>Optional attributes</h3>{attributeGroups.map((group) => <fieldset disabled={busy} key={group.title}><legend>{group.title}</legend>{group.fields.map((field) => <label key={field.key}>{field.label}<input name={field.key} type={field.number ? "number" : "text"} min={field.number ? "0.1" : undefined} step={field.number ? field.step ?? "0.1" : undefined} value={attributes[field.key] ?? ""} onChange={(event) => setAttributes((current) => ({ ...current, [field.key]: event.target.value }))} /></label>)}</fieldset>)}<button type="submit" disabled={busy}>Save attributes</button></form>
     {error && <p className="error" role="alert">{error}</p>}
