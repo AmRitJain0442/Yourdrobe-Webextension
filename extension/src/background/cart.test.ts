@@ -47,4 +47,9 @@ describe("addOutfitToCarts", () => {
     await expect(pending).resolves.toMatchObject({ added: 1 });
     expect(chrome.tabs.sendMessage).toHaveBeenCalledTimes(2);
   });
+
+  it("ignores malformed messages without opening an arbitrary URL", async () => {
+    await expect(addOutfitToCarts([null, { platform: "amazon_in", title: "Fake", product_url: "https://evil.example/item" }])).resolves.toEqual({ added: 0, needs_attention: [], carts_opened: 0 });
+    expect(chrome.tabs.create).not.toHaveBeenCalled();
+  });
 });

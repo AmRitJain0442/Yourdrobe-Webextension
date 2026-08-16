@@ -32,8 +32,13 @@ function waitForLoad(tab: chrome.tabs.Tab): Promise<void> {
   });
 }
 
-function validItem(item: OutfitItem) {
-  const store = stores[item.platform];
+function validItem(input: unknown): input is OutfitItem {
+  if (!input || typeof input !== "object") return false;
+  const item = input as Record<string, unknown>;
+  if (typeof item.platform !== "string" || !(item.platform in stores)
+    || typeof item.title !== "string" || !item.title.trim()
+    || typeof item.product_url !== "string") return false;
+  const store = stores[item.platform as OutfitItem["platform"]];
   try {
     const url = new URL(item.product_url);
     return store && url.protocol === "https:" && url.hostname.toLowerCase().replace(/^www\./, "") === store.host;
@@ -54,8 +59,9 @@ async function sendCartMessage(tabId: number): Promise<AddToCartResponse> {
   throw new Error("The product page could not be reached.");
 }
 
-export async function addOutfitToCarts(input: OutfitItem[]) {
-  const items = input.filter((item, index) => validItem(item) && input.findIndex((candidate) => candidate.product_url === item.product_url) === index).slice(0, 20);
+export async function addOutfitToCarts(input: unknown[]) {
+  const valid = input.filter(validItem);
+  const items = valid.filter((item, index) => valid.findIndex((candidate) => candidate.product_url === item.product_url) === index).slice(0, 20);
   const needs_attention: string[] = [];
   const addedStores = new Set<OutfitItem["platform"]>();
   let added = 0;
