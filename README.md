@@ -52,13 +52,15 @@ $env:YOUCAM_API_KEYS='first-api-key,second-api-key'
 3. Choose **Load unpacked**.
 4. Select `extension/dist`.
 5. Open a search or category listing on Amazon India, Amazon US, Flipkart, or Nykaa.
-6. Click the extension action and complete local profile consent.
+6. Click the extension action, upload the five required profile photos, and complete local profile consent.
 7. Run the mock or live flow for a supported listing as described below. Product links continue to open their source listing.
 
 ## Live YouCam clothing previews and privacy
 
 - Live YouCam supports clothing only: top, outerwear, bottom, and dress.
-- Every live clothing type requires a front full-body profile photo when starting from the original profile photo.
+- A profile requires exactly five uploads: front, left, and right face photos plus front and side full-body photos.
+- Yourdrobe does not ask for body measurements or clothing sizes.
+- Live clothing uses the front full-body profile photo when starting from the original profile photo.
 - Unsupported categories show a failure in live mode.
 - `Mock AI preview` appears only when no `YOUCAM_API_KEYS` are configured.
 - Once keys are configured, provider or product-image failures remain failures and never fall back to mock imagery.
@@ -81,7 +83,7 @@ This is a manual check only. It consumes provider units and is never run automat
 
 1. In a private shell, configure one real key using the live-mode setup above and start the backend.
 2. Build or reload the unpacked extension.
-3. Open a supported top listing, upload the required front full-body profile file, and accept cloud processing when prompted.
+3. Open a supported top listing, upload the five required profile photos, and accept cloud processing when prompted.
 4. Confirm the result is labelled `YouCam AI preview`, then select **Use as active outfit**.
 5. Open a supported bottom listing and confirm its live preview runs from the saved active outfit.
 6. Select **Reset to original profile photo** and confirm the active outfit is removed.
