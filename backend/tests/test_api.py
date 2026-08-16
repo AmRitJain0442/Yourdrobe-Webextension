@@ -46,9 +46,11 @@ class FakeYouCam:
 
 class FakeProfileGenerator:
     enabled = True
+    tryon_enabled = False
 
     def __init__(self) -> None:
         self.sources: list[str] = []
+        self.tryons: list[tuple[str, str, str, str]] = []
         self.failure: ProfileGenerationFailure | None = None
 
     def generate(self, source: str) -> list[dict[str, str]]:
@@ -59,6 +61,12 @@ class FakeProfileGenerator:
             {"kind": role, "image_data_url": f"data:image/jpeg;base64,{role}"}
             for role in ("face_front", "face_left", "face_right", "full_body_front", "full_body_side")
         ]
+
+    def generate_tryon(self, source: str, reference: str, title: str, product_type: str) -> tuple[str, bytes]:
+        self.tryons.append((source, reference, title, product_type))
+        if self.failure:
+            raise self.failure
+        return "image/png", b"google-rendered"
 
 
 class ApiJourneyTest(unittest.TestCase):
@@ -106,26 +114,52 @@ class ApiJourneyTest(unittest.TestCase):
 
     def makeup_batch(self) -> dict:
         session_id = self.client.post("/v1/sessions", json={}).json()["session_id"]
-        profile_id = self.create_profile(session_id, ("face_front",))
+        profile_id = self.create_profile(session_id, ("full_body_front",))
         return {
             "session_id": session_id,
             "profile_id": profile_id,
             "product_ids": [self.create_product("unused", "makeup")],
-            "assets": [{"kind": "face_front", "image_data_url": "data:image/jpeg;base64,cGhvdG8="}],
+            "assets": [{"kind": "full_body_front", "image_data_url": "data:image/jpeg;base64,cGhvdG8="}],
             "cloud_consent": True,
         }
 
     def test_capabilities_report_mock_when_provider_disabled(self) -> None:
         self.assertEqual(self.client.get("/v1/capabilities").json(), {
             "tryon_provider": "mock", "live_product_types": [],
+            "youcam_product_types": [], "google_product_types": [],
         })
 
     def test_capabilities_report_live_clothing_types(self) -> None:
         main.youcam = FakeYouCam()
         self.assertEqual(self.client.get("/v1/capabilities").json(), {
             "tryon_provider": "youcam",
-            "live_product_types": ["top", "outerwear", "bottom", "dress", "footwear"],
+            "live_product_types": ["top", "outerwear", "dress", "bottom", "footwear"],
+            "youcam_product_types": ["top", "outerwear", "bottom", "dress", "footwear"],
+            "google_product_types": [],
         })
+
+    def test_google_tryon_supports_every_non_youcam_category_and_returns_local_result(self) -> None:
+        main.profile_generator.tryon_enabled = True
+        session_id = self.client.post("/v1/sessions", json={}).json()["session_id"]
+        profile_id = self.create_profile(session_id, ("full_body_front",))
+
+        for product_type in main.GOOGLE_TYPES:
+            with self.subTest(product_type=product_type):
+                product_id = self.create_product("unused", product_type)
+                response = self.client.post("/v1/tryons/batch", json={
+                    "session_id": session_id,
+                    "profile_id": profile_id,
+                    "product_ids": [product_id],
+                    "assets": [{"kind": "full_body_front", "image_data_url": "data:image/jpeg;base64,cGhvdG8="}],
+                    "cloud_consent": True,
+                })
+                job = response.json()["jobs"][0]
+                self.assertEqual(job["status"], "completed")
+                self.assertTrue(job["result_url"].startswith("http://127.0.0.1:8001/v1/tryons/"))
+                result = self.client.get(f"/v1/tryons/{job['job_id']}/result-image")
+                self.assertEqual((result.status_code, result.content, result.headers["content-type"]), (200, b"google-rendered", "image/png"))
+
+        self.assertEqual([call[3] for call in main.profile_generator.tryons], main.GOOGLE_TYPES)
 
     def test_live_dress_creates_and_polls_provider_job(self) -> None:
         provider = FakeYouCam()
@@ -273,7 +307,7 @@ class ApiJourneyTest(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 200)
 
-    def test_active_outfit_does_not_satisfy_non_clothing_requirements(self) -> None:
+    def test_active_outfit_can_source_an_accessory_even_when_its_provider_is_unavailable(self) -> None:
         main.youcam = FakeYouCam()
         session_id = self.client.post("/v1/sessions", json={}).json()["session_id"]
         profile_id = self.create_profile(session_id, ())
@@ -285,10 +319,8 @@ class ApiJourneyTest(unittest.TestCase):
             "cloud_consent": True,
             "outfit_base_image_data_url": "data:image/jpeg;base64,b3V0Zml0",
         })
-        self.assertEqual(response.status_code, 422)
-        self.assertEqual(response.json()["detail"], {
-            "code": "missing_profile_assets", "roles": ["face_front"],
-        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["jobs"][0]["error_code"], "unsupported_live_category")
 
     def test_live_batch_rejects_invalid_active_outfit_data(self) -> None:
         main.youcam = FakeYouCam()

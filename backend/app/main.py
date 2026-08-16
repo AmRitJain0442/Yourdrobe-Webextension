@@ -54,7 +54,7 @@ class GenerateProfileInput(BaseModel):
 
 class ProductInput(BaseModel):
     platform: str
-    title: str = Field(min_length=1)
+    title: str = Field(min_length=1, max_length=300)
     brand: str | None = None
     price: float | None = None
     currency: str | None = None
@@ -63,8 +63,8 @@ class ProductInput(BaseModel):
         "makeup", "eyewear", "headwear", "earrings", "necklace", "top", "outerwear",
         "dress", "bottom", "belt", "bag", "watch", "bracelet", "ring", "footwear", "unknown",
     ] = "unknown"
-    image_url: str
-    product_url: str
+    image_url: str = Field(min_length=1, max_length=2048)
+    product_url: str = Field(min_length=1, max_length=2048)
     metadata: dict[str, str] = Field(default_factory=dict)
 
 
@@ -105,10 +105,10 @@ PLATFORM_HOSTS = {
     "nykaa": "nykaa.com",
 }
 PRODUCT_REQUIREMENTS = {
-    "makeup": (("face_front",),),
-    "eyewear": (("face_front",),),
-    "headwear": (("face_front",),),
-    "earrings": (("face_front",),),
+    "makeup": (("full_body_front",),),
+    "eyewear": (("full_body_front",),),
+    "headwear": (("full_body_front",),),
+    "earrings": (("full_body_front",),),
     "necklace": (("full_body_front",),),
     "top": (("full_body_front",),),
     "outerwear": (("full_body_front",),),
@@ -121,14 +121,22 @@ PRODUCT_REQUIREMENTS = {
     "ring": (("full_body_front",),),
     "footwear": (("full_body_front",),),
 }
-LIVE_TYPES = ["top", "outerwear", "bottom", "dress", "footwear"]
-LIVE_MAPPING = {
+YOUCAM_TYPES = ["top", "outerwear", "bottom", "dress", "footwear"]
+YOUCAM_MAPPING = {
     "top": ("full_body_front", "upper_body"),
     "outerwear": ("full_body_front", "upper_body"),
     "bottom": ("full_body_front", "lower_body"),
     "dress": ("full_body_front", "full_body"),
     "footwear": ("full_body_front", "shoes"),
 }
+GOOGLE_TYPES = [
+    "makeup", "eyewear", "headwear", "earrings", "necklace", "belt", "bag", "watch", "bracelet", "ring",
+]
+GOOGLE_MAPPING = {product_type: "full_body_front" for product_type in GOOGLE_TYPES}
+ALL_LIVE_TYPES = [
+    "makeup", "eyewear", "headwear", "earrings", "necklace", "top", "outerwear", "dress", "bottom",
+    "belt", "bag", "watch", "bracelet", "ring", "footwear",
+]
 
 
 def new_id(prefix: str) -> str:
@@ -148,9 +156,17 @@ def health() -> dict[str, str]:
 
 @app.get("/v1/capabilities")
 def capabilities() -> dict[str, object]:
+    google_enabled = bool(getattr(profile_generator, "tryon_enabled", False))
+    live_types = [
+        product_type for product_type in ALL_LIVE_TYPES
+        if (product_type in YOUCAM_MAPPING and youcam.enabled) or (product_type in GOOGLE_MAPPING and google_enabled)
+    ]
+    provider = "hybrid" if youcam.enabled and google_enabled else "youcam" if youcam.enabled else "google" if google_enabled else "mock"
     return {
-        "tryon_provider": "youcam" if youcam.enabled else "mock",
-        "live_product_types": LIVE_TYPES if youcam.enabled else [],
+        "tryon_provider": provider,
+        "live_product_types": live_types,
+        "youcam_product_types": YOUCAM_TYPES if youcam.enabled else [],
+        "google_product_types": GOOGLE_TYPES if google_enabled else [],
     }
 
 
@@ -227,7 +243,7 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
         for alternatives in PRODUCT_REQUIREMENTS.get(product["product_type"], ()):
             if (
                 body.outfit_base_image_data_url
-                and product["product_type"] in LIVE_MAPPING
+                and product["product_type"] in (YOUCAM_MAPPING | GOOGLE_MAPPING)
                 and "full_body_front" in alternatives
             ):
                 continue
@@ -240,7 +256,8 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
     if missing:
         raise HTTPException(422, {"code": "missing_profile_assets", "roles": sorted(missing)})
 
-    if not youcam.enabled:
+    google_enabled = bool(getattr(profile_generator, "tryon_enabled", False))
+    if not youcam.enabled and not google_enabled:
         created = []
         for product_id, product in zip(body.product_ids, resolved_products):
             job_id = new_id("tryon")
@@ -254,37 +271,38 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
             created.append({"job_id": job_id, "product_id": product_id, "status": "queued"})
         return {"jobs": created}
 
-    has_supported_product = any(product["product_type"] in LIVE_MAPPING for product in resolved_products)
+    has_supported_product = any(
+        (product["product_type"] in YOUCAM_MAPPING and youcam.enabled)
+        or (product["product_type"] in GOOGLE_MAPPING and google_enabled)
+        for product in resolved_products
+    )
     if has_supported_product and not body.cloud_consent:
         raise HTTPException(400, {"code": "live_consent_required"})
     asset_by_role = {asset.kind: asset.image_data_url for asset in body.assets}
-    missing = {
-        mapping[0] for product in resolved_products
-        if (
-            (mapping := LIVE_MAPPING.get(product["product_type"]))
-            and not body.outfit_base_image_data_url
-            and mapping[0] not in asset_by_role
-        )
-    }
+    missing = set()
+    if not body.outfit_base_image_data_url:
+        for product in resolved_products:
+            product_type = product["product_type"]
+            role = (
+                YOUCAM_MAPPING[product_type][0]
+                if youcam.enabled and product_type in YOUCAM_MAPPING
+                else GOOGLE_MAPPING.get(product_type) if google_enabled else None
+            )
+            if role and role not in asset_by_role:
+                missing.add(role)
     if missing:
         raise HTTPException(422, {"code": "missing_profile_assets", "roles": sorted(missing)})
 
     created = []
     for product_id, product in zip(body.product_ids, resolved_products):
         job_id = new_id("tryon")
-        mapping = LIVE_MAPPING.get(product["product_type"])
-        if not mapping:
-            job = {
-                "job_id": job_id,
-                "product_id": product_id,
-                "error_code": "unsupported_live_category",
-                "error_message": "Live try-on is not available for this product type.",
-                "mock": False,
-            }
-        else:
+        product_type = product["product_type"]
+        mapping = YOUCAM_MAPPING.get(product_type) if youcam.enabled else None
+        google_role = GOOGLE_MAPPING.get(product_type) if google_enabled else None
+        if mapping:
             try:
                 source = body.outfit_base_image_data_url or asset_by_role[mapping[0]]
-                if product["product_type"] == "footwear":
+                if product_type == "footwear":
                     started = youcam.create_shoes_task(
                         source, product["image_url"], product.get("metadata", {}).get("gender", ""),
                     )
@@ -307,16 +325,49 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
                     "provider_task_kind": started.task_kind,
                     "mock": False,
                 }
+        elif google_role:
+            try:
+                source = body.outfit_base_image_data_url or asset_by_role[google_role]
+                result_mime, result_bytes = profile_generator.generate_tryon(
+                    source, product["image_url"], product["title"], product_type,
+                )
+            except ProfileGenerationFailure as failure:
+                job = {
+                    "job_id": job_id,
+                    "product_id": product_id,
+                    "error_code": "google_tryon_failed",
+                    "error_message": str(failure),
+                    "mock": False,
+                }
+            else:
+                job = {
+                    "job_id": job_id,
+                    "product_id": product_id,
+                    "provider": "google",
+                    "result_bytes": result_bytes,
+                    "result_mime": result_mime,
+                    "result_url": f"http://127.0.0.1:8001/v1/tryons/{job_id}/result-image",
+                    "completed": True,
+                    "mock": False,
+                }
+        else:
+            job = {
+                "job_id": job_id,
+                "product_id": product_id,
+                "error_code": "unsupported_live_category",
+                "error_message": "Live try-on is not available for this product type.",
+                "mock": False,
+            }
         remember(jobs, job_id, job)
         created.append({
             "job_id": job_id,
             "product_id": product_id,
-            "status": "failed" if "error_code" in job else "queued",
+            "status": "failed" if "error_code" in job else "completed" if job.get("completed") else "queued",
             **({
                 "error_code": job["error_code"],
                 "error_message": job["error_message"],
                 "mock": False,
-            } if "error_code" in job else {}),
+            } if "error_code" in job else {"result_url": job["result_url"], "mock": False} if job.get("completed") else {}),
         })
     return {"jobs": created}
 
@@ -335,6 +386,14 @@ def get_tryon(job_id: str) -> dict:
             "status": "completed",
             "result_url": job["result_url"],
             "mock": True,
+        }
+    if job.get("provider") == "google" and job.get("completed") is True:
+        return {
+            "job_id": job_id,
+            "product_id": job["product_id"],
+            "status": "completed",
+            "result_url": job["result_url"],
+            "mock": False,
         }
     if "error_code" in job:
         return {
@@ -383,6 +442,8 @@ def get_tryon_result_image(job_id: str) -> Response:
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Try-on job not found")
+    if job.get("provider") == "google" and job.get("completed") is True:
+        return Response(content=job["result_bytes"], media_type=job["result_mime"])
     if not (
         job.get("mock") is False
         and job.get("completed") is True

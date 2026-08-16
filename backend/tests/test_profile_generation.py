@@ -75,6 +75,24 @@ class NanoBananaClientTest(unittest.TestCase):
             self.assertEqual(call["config"].image_config.image_size, "2K")
         self.assertTrue(all(asset["image_data_url"].startswith("data:image/jpeg;base64,") for asset in assets))
 
+    def test_generates_a_composed_tryon_from_the_person_and_product_images(self) -> None:
+        provider = FakeGenAI()
+        client = NanoBananaClient(
+            lambda: provider,
+            reference_loader=lambda _url: ("image/png", b"product"),
+        )
+        source = "data:image/jpeg;base64," + base64.b64encode(b"person").decode()
+
+        mime_type, image = client.generate_tryon(
+            source, "https://images.example/bag.png", "Canvas shoulder bag", "bag",
+        )
+
+        self.assertEqual((mime_type, image), ("image/jpeg", b"generated"))
+        call = provider.models.calls[0]
+        self.assertIn("preserve", call["contents"][0])
+        self.assertEqual(call["contents"][1].inline_data.data, b"person")
+        self.assertEqual(call["contents"][2].inline_data.data, b"product")
+
     def test_rejects_invalid_or_oversized_source_images_before_provider_use(self) -> None:
         provider = FakeGenAI()
         client = NanoBananaClient(lambda: provider)
