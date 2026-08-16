@@ -12,7 +12,7 @@ describe("profile requirements", () => {
   it("deduplicates a mixed batch in stable order", () => {
     expect(requirementsForProducts([
       product("makeup"), product("eyewear"), product("dress"), product("watch"), product("footwear"),
-    ])).toEqual(["face_front", "full_body_front", "hand_wrist", "feet_front"]);
+    ])).toEqual(["face_front", "full_body_front"]);
   });
 
   it("requires one full-body image for every live clothing type", () => {
@@ -23,9 +23,10 @@ describe("profile requirements", () => {
       .toEqual(["full_body_front"]);
   });
 
-  it("accepts either hand for jewellery", () => {
-    expect(missingRequirements([product("ring")], ["right_hand_wrist"])).toEqual([]);
-    expect(rolesForRequirement("hand_wrist")).toEqual(["left_hand_wrist", "right_hand_wrist"]);
+  it("uses the front full-body photo for non-face products", () => {
+    expect(requirementsForProducts([
+      product("necklace"), product("watch"), product("bracelet"), product("ring"), product("footwear"),
+    ])).toEqual(["full_body_front"]);
   });
 
   it("returns only unsatisfied requirements", () => {

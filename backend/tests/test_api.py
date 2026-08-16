@@ -538,6 +538,22 @@ class ApiJourneyTest(unittest.TestCase):
             "code": "missing_profile_assets", "roles": ["full_body_front"],
         })
 
+    def test_front_full_body_photo_satisfies_non_face_product_requirements(self) -> None:
+        session_id = self.client.post("/v1/sessions", json={}).json()["session_id"]
+        profile_id = self.create_profile(session_id, ("full_body_front",))
+        product_ids = [self.create_product("unused", product_type) for product_type in (
+            "necklace", "watch", "bracelet", "ring", "footwear",
+        )]
+
+        response = self.client.post("/v1/tryons/batch", json={
+            "session_id": session_id,
+            "profile_id": profile_id,
+            "product_ids": product_ids,
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["jobs"]), 5)
+
     def test_normalize_rejects_unsupported_platform_or_host(self) -> None:
         response = self.client.post(
             "/v1/products/normalize",

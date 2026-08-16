@@ -102,17 +102,17 @@ PRODUCT_REQUIREMENTS = {
     "eyewear": (("face_front",),),
     "headwear": (("face_front",),),
     "earrings": (("face_front",),),
-    "necklace": (("upper_body_front",),),
+    "necklace": (("full_body_front",),),
     "top": (("full_body_front",),),
     "outerwear": (("full_body_front",),),
     "dress": (("full_body_front",),),
     "bottom": (("full_body_front",),),
     "belt": (("full_body_front",),),
     "bag": (("full_body_front",),),
-    "watch": (("left_hand_wrist", "right_hand_wrist"),),
-    "bracelet": (("left_hand_wrist", "right_hand_wrist"),),
-    "ring": (("left_hand_wrist", "right_hand_wrist"),),
-    "footwear": (("feet_front",),),
+    "watch": (("full_body_front",),),
+    "bracelet": (("full_body_front",),),
+    "ring": (("full_body_front",),),
+    "footwear": (("full_body_front",),),
 }
 LIVE_TYPES = ["top", "outerwear", "bottom", "dress"]
 LIVE_MAPPING = {
