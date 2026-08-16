@@ -210,6 +210,32 @@ describe("App", () => {
     expect(host.querySelector('.bottom-nav [aria-current="page"]')?.textContent).toContain("Wardrobe");
   });
 
+  it("places the latest preview below search and toggles it with the active outfit", async () => {
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    mockCapabilities("youcam", ["dress"]);
+    mockCompletedJob();
+
+    await completeRun();
+
+    const search = host.querySelector(".product-search") as HTMLElement;
+    const stage = host.querySelector(".look-stage") as HTMLElement;
+    const catalog = host.querySelector(".catalog-section") as HTMLElement;
+    expect(search.compareDocumentPosition(stage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(stage.compareDocumentPosition(catalog) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(stage.querySelector(".results-section")).not.toBeNull();
+    expect(stage.querySelector("article.active-outfit")).toBeNull();
+    expect(host.querySelector('.look-toggle [aria-pressed="true"]')?.textContent).toBe("Preview");
+
+    await click("Active outfit");
+
+    expect(stage.querySelector(".results-section")).toBeNull();
+    expect(stage.querySelector("article.active-outfit")).not.toBeNull();
+    expect(host.querySelector('.look-toggle [aria-pressed="true"]')?.textContent).toBe("Active outfit");
+
+    await click("Preview");
+    expect(stage.querySelector(".results-section")).not.toBeNull();
+  });
+
   it("shows 25 products per page and lets the user browse the rest", async () => {
     (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,

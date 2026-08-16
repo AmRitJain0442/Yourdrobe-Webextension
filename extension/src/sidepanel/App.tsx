@@ -11,6 +11,7 @@ import { YouCamConsent } from "./YouCamConsent";
 
 type Phase = "loading" | "profile-setup" | "profile-manager" | "youcam-consent" | "ready" | "running" | "results" | "empty" | "error";
 type AppTab = "try-on" | "wardrobe";
+type LookView = "preview" | "active";
 type Result = { product: NormalizedProduct; job: TryOnJob };
 type FinalizeResult = { added: number; needs_attention: string[]; carts_opened: number; error?: string };
 const unsupported = "Open a supported Amazon, Flipkart, or Nykaa listing page and try again.";
@@ -66,6 +67,7 @@ const outfitItem = (product: Product): OutfitItem | null => product.product_type
 export function App() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [activeTab, setActiveTab] = useState<AppTab>("try-on");
+  const [lookView, setLookView] = useState<LookView>("active");
   const [products, setProducts] = useState<Product[]>([]);
   const [productPage, setProductPage] = useState(0);
   const [profile, setProfile] = useState<ProfileMetadata | null>(null);
@@ -131,6 +133,7 @@ export function App() {
         pendingProducts.current = [];
         if (foundProducts[0]) setSearchStore(foundProducts[0].platform);
         setResults([]);
+        setLookView("active");
         setError("");
         setPhase(foundProducts.length ? "ready" : "empty");
       }).catch((reason: unknown) => {
@@ -169,6 +172,7 @@ export function App() {
       const store = searchStores.find((item) => item.value === searchStore) ?? searchStores[0];
       await chrome.tabs.update(tab.id, { url: store.url(encodeURIComponent(query)) });
       setResults([]);
+      setLookView("active");
       setPhase("loading");
     } catch (reason) {
       setSearchError(reason instanceof Error ? reason.message : "Could not start the product search.");
@@ -254,6 +258,7 @@ export function App() {
         const product = byId.get(job.product_id);
         return product ? [{ product, job }] : [];
       }));
+      setLookView("preview");
       setPhase("results");
     } catch (reason) {
       if (request.signal.aborted) return;
@@ -322,9 +327,11 @@ export function App() {
       setActiveOutfit(saved.active);
       setOutfitItems(saved.items);
       setOutfitVersions(saved.outfits);
+      setLookView("active");
       setOutfitStatus("Outfit version saved and selected.");
     } catch (reason) {
       if (!mounted.current) return;
+      setLookView("active");
       setOutfitStatus("");
       setOutfitError(reason instanceof Error ? reason.message : "We could not save that outfit. Please try again.");
     } finally {
@@ -345,6 +352,7 @@ export function App() {
       setActiveOutfit(null);
       setOutfitItems([]);
       setOutfitVersions([]);
+      setLookView("preview");
       setOutfitStatus("Active outfit reset.");
     } catch (reason) {
       if (!mounted.current) return;
@@ -412,6 +420,7 @@ export function App() {
       if (!mounted.current) return;
       setActiveOutfit({ metadata: selected.metadata, image_data_url: selected.image_data_url });
       setOutfitItems(selected.items);
+      setLookView("active");
       setOutfitStatus("Saved outfit selected.");
     } catch (reason) {
       if (mounted.current) setOutfitError(reason instanceof Error ? reason.message : "We could not select that saved outfit.");
@@ -446,7 +455,16 @@ export function App() {
         </form>
         {searchError && <p className="error" role="alert">{searchError}</p>}
       </section>
-      {(phase === "ready" || phase === "results") && activeOutfit && <ActiveOutfitPanel outfit={activeOutfit} outfits={outfitVersions} items={outfitItems} busy={outfitBusy || finalizeBusy} onSelect={(index) => void chooseOutfitVersion(index)} onRemove={(url) => void removeSelectedProduct(url)} onFinalize={() => void finalizeOutfit()} onReset={() => void resetActiveOutfit()} />}
+      {(phase === "results" || (phase === "ready" && activeOutfit)) && <div className="look-stage">
+        {phase === "results" && activeOutfit && <div className="look-toggle" role="group" aria-label="Choose fitting-room view">
+          <button type="button" aria-pressed={lookView === "preview"} onClick={() => setLookView("preview")}>Preview</button>
+          <button type="button" aria-pressed={lookView === "active"} onClick={() => setLookView("active")}>Active outfit</button>
+        </div>}
+        {phase === "results" && (!activeOutfit || lookView === "preview")
+          ? <PreviewPanel results={results} busy={outfitBusy} onActivate={(result) => void useAsActiveOutfit(result)} />
+          : activeOutfit && <ActiveOutfitPanel outfit={activeOutfit} outfits={outfitVersions} items={outfitItems} busy={outfitBusy || finalizeBusy} onSelect={(index) => void chooseOutfitVersion(index)} onRemove={(url) => void removeSelectedProduct(url)} onFinalize={() => void finalizeOutfit()} onReset={() => void resetActiveOutfit()} />}
+      </div>}
+      {phase === "running" && <p className="preview-loading" role="status">Creating your previews...</p>}
       {(phase === "ready" || phase === "results") && outfitStatus && <p className="outfit-message" role="status">{outfitStatus}</p>}
       {(phase === "ready" || phase === "results") && outfitError && <p className="error outfit-message" role="alert">{outfitError}</p>}
       {(phase === "ready" || phase === "results") && finalizeStatus && <p className="outfit-message" role="status">{finalizeStatus}</p>}
@@ -465,22 +483,7 @@ export function App() {
         <button className="secondary" disabled={productPage + 1 === productPageCount} onClick={() => setProductPage((page) => page + 1)}>Next page</button>
       </nav>}
       </section>}
-      {phase === "running" && <p role="status">Creating your previews...</p>}
       {phase === "empty" && <section><h2>No products found on this page.</h2><p>Browse a product listing or search results on this supported site, then retry.</p><button onClick={() => location.reload()}>Retry</button></section>}
-      {phase === "results" && <section className="results-section">
-      <div className="section-heading"><div><span className="eyebrow">AI fitting room</span><h2>Your previews</h2></div><span aria-hidden="true">✦</span></div>
-      <div className="list preview-strip">{results.map(({ product, job }) => {
-        const failed = job.status === "failed" || (job.mock === false && !isResultUrl(job.result_url));
-        return <article className="product" key={job.job_id}>
-          <div><span className="badge">{job.mock === false ? "Live AI preview" : "Mock AI preview"}</span><h3>{product.title}</h3></div>
-          {failed
-            ? <p className="error">{job.error_message ?? "This product preview failed. You can still view the original listing."}</p>
-            : <img src={job.result_url || product.image_url} alt={`Preview of ${product.title}`} />}
-          {job.status === "completed" && job.mock === false && isResultUrl(job.result_url) && <button className="ai-button" disabled={outfitBusy} onClick={() => void useAsActiveOutfit({ product, job })}>Add this to active outfit</button>}
-          <a className="button secondary" href={product.product_url} target="_blank" rel="noreferrer">View original product</a>
-        </article>;
-      })}</div>
-      </section>}
       {phase === "error" && <section><p className="error" role="alert">{error}</p><button onClick={() => location.reload()}>Retry</button></section>}
       {(["ready", "results", "empty", "error"] as Phase[]).includes(phase) && <button className="secondary manage-profile" disabled={outfitBusy} onClick={openProfileManager}>Manage profile</button>}
     </div>}
@@ -498,6 +501,23 @@ export function App() {
       <button id="wardrobe-tab" className="wardrobe-tab" type="button" aria-current={activeTab === "wardrobe" ? "page" : undefined} aria-controls="wardrobe-panel" onClick={() => setActiveTab("wardrobe")}>Wardrobe</button>
     </nav>}
   </main>;
+}
+
+function PreviewPanel({ results, busy, onActivate }: { results: Result[]; busy: boolean; onActivate: (result: Result) => void }) {
+  return <section className="results-section">
+    <div className="section-heading"><div><span className="eyebrow">AI fitting room</span><h2>Your previews</h2></div><span aria-hidden="true">✦</span></div>
+    <div className="list preview-strip">{results.map(({ product, job }) => {
+      const failed = job.status === "failed" || (job.mock === false && !isResultUrl(job.result_url));
+      return <article className="product" key={job.job_id}>
+        <div><span className="badge">{job.mock === false ? "Live AI preview" : "Mock AI preview"}</span><h3>{product.title}</h3></div>
+        {failed
+          ? <p className="error">{job.error_message ?? "This product preview failed. You can still view the original listing."}</p>
+          : <img src={job.result_url || product.image_url} alt={`Preview of ${product.title}`} />}
+        {job.status === "completed" && job.mock === false && isResultUrl(job.result_url) && <button className="ai-button" disabled={busy} onClick={() => onActivate({ product, job })}>Add this to active outfit</button>}
+        <a className="button secondary" href={product.product_url} target="_blank" rel="noreferrer">View original product</a>
+      </article>;
+    })}</div>
+  </section>;
 }
 
 function ActiveOutfitPanel({ outfit, outfits, items, busy, wardrobe = false, onSelect, onRemove, onFinalize, onReset }: { outfit: ActiveOutfit; outfits: CompiledOutfit[]; items: OutfitItem[]; busy: boolean; wardrobe?: boolean; onSelect: (index: number) => void; onRemove: (url: string) => void; onFinalize: () => void; onReset: () => void }) {
