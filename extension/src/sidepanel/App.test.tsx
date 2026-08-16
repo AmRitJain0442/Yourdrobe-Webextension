@@ -24,6 +24,7 @@ let host: HTMLDivElement;
 let fetchMock: ReturnType<typeof vi.fn>;
 let capabilities: { tryon_provider: "mock" | "youcam"; live_product_types: ProductType[] };
 let batchJob: TryOnJob;
+let onTabUpdated: ((tabId: number, changeInfo: chrome.tabs.OnUpdatedInfo, tab: chrome.tabs.Tab) => void) | undefined;
 const product = {
   platform: "amazon_in" as const,
   title: "Daily essential",
@@ -124,6 +125,10 @@ beforeEach(() => {
     tabs: {
       query: vi.fn().mockResolvedValue([{ id: 1 }]),
       sendMessage: vi.fn().mockResolvedValue({ ok: true, products: [product] }),
+      onUpdated: {
+        addListener: vi.fn((listener) => { onTabUpdated = listener; }),
+        removeListener: vi.fn(),
+      },
     },
     storage: { local: { get: vi.fn().mockResolvedValue({}), set: vi.fn() } },
   } as unknown as typeof chrome;
@@ -153,6 +158,7 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
+  onTabUpdated = undefined;
 });
 
 afterEach(() => {
@@ -165,6 +171,24 @@ afterEach(() => {
 });
 
 describe("App", () => {
+  it("refreshes products when the active shopping page finishes navigating", async () => {
+    await renderApp();
+    expect(host.textContent).toContain("Daily essential");
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      products: [{ ...product, title: "Baggy jeans", product_url: "https://amazon.in/dp/JEANS", product_type: "bottom" }],
+    });
+
+    await act(async () => {
+      onTabUpdated?.(1, { status: "complete" }, { id: 1, active: true } as chrome.tabs.Tab);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain("Baggy jeans");
+    expect(host.textContent).not.toContain("Daily essential");
+  });
+
   it("requires all five core photos even when the product source photo exists", async () => {
     vi.mocked(loadProfile).mockResolvedValue({
       ...fullBodyProfile,

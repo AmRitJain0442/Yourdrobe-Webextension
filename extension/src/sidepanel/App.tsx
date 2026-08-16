@@ -29,6 +29,20 @@ const requiresOriginalFullBody = (products: Product[]) => products.some((product
   !activeOutfitProductTypes.has(product.product_type ?? "unknown")
   && requirementsForProducts([product]).includes("full_body_front"),
 );
+async function extractProducts(tabId?: number) {
+  if (!tabId) {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    tabId = tab?.id;
+  }
+  if (!tabId) throw new Error(unsupported);
+  try {
+    const response = await chrome.tabs.sendMessage<unknown, ExtractProductsResponse>(tabId, { type: "EXTRACT_PRODUCTS" });
+    if (!response.ok) throw new Error(response.error);
+    return response.products;
+  } catch {
+    throw new Error(unsupported);
+  }
+}
 
 export function App() {
   const [phase, setPhase] = useState<Phase>("loading");
@@ -52,16 +66,7 @@ export function App() {
     mounted.current = true;
     let cancelled = false;
     void Promise.all([
-      chrome.tabs.query({ active: true, currentWindow: true }).then(async ([tab]) => {
-        if (!tab?.id) throw new Error(unsupported);
-        try {
-          const response = await chrome.tabs.sendMessage<unknown, ExtractProductsResponse>(tab.id, { type: "EXTRACT_PRODUCTS" });
-          if (!response.ok) throw new Error(response.error);
-          return response.products;
-        } catch {
-          throw new Error(unsupported);
-        }
-      }),
+      extractProducts(),
       loadProfile(),
       loadLegacyImage(),
       loadActiveOutfit(),
@@ -77,10 +82,28 @@ export function App() {
       setError(reason instanceof Error ? reason.message : unsupported);
       setPhase("error");
     });
+    const refreshAfterNavigation = (tabId: number, changeInfo: chrome.tabs.OnUpdatedInfo, tab: chrome.tabs.Tab) => {
+      if (!tab.active || changeInfo.status !== "complete") return;
+      activeRequest.current?.abort();
+      setPhase("loading");
+      void extractProducts(tabId).then((foundProducts) => {
+        if (cancelled) return;
+        setProducts(foundProducts);
+        setResults([]);
+        setError("");
+        setPhase(foundProducts.length ? "ready" : "empty");
+      }).catch((reason: unknown) => {
+        if (cancelled) return;
+        setError(reason instanceof Error ? reason.message : unsupported);
+        setPhase("error");
+      });
+    };
+    chrome.tabs.onUpdated.addListener(refreshAfterNavigation);
     return () => {
       cancelled = true;
       mounted.current = false;
       activeRequest.current?.abort();
+      chrome.tabs.onUpdated.removeListener(refreshAfterNavigation);
     };
   }, []);
 
