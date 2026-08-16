@@ -74,7 +74,7 @@ The side panel can search Amazon India, Amazon US, Flipkart, or Nykaa for you. C
 - The active outfit is shown as a large preview. New product and generated preview choices use a horizontal scrolling gallery.
 - Shoe cards ask for a Women or Men preview model and expose **Try these shoes**. The Shoes API uses the active outfit image when one is saved, otherwise it uses the front full-body profile photo.
 - Bags, belts, and jewelry are not supported by the current provider workflow. When an active outfit exists, these products can be selected with **Add to outfit without preview** and are included in finalization without pretending that an AI preview was generated.
-- **Finalize outfit and open carts** opens each selected retailer product page, uses its visible Add to Cart or Add to Bag control, and opens the matching retailer cart. Products that require a size, colour, sign-in, CAPTCHA, or another choice stay open for manual completion and are not reported as added.
+- **Finalize outfit in this tab** visits each selected product in the current tab and uses its visible Add to Cart or Add to Bag control. After every item is added, that same tab finishes on the last product's retailer cart. If a product requires a size, colour, sign-in, CAPTCHA, or another choice, the sequence stops on that product for manual completion and does not report it as added.
 - **Reset to original profile photo** removes the active outfit. Deleting the complete profile removes it too.
 - Sequential raster edits can alter previously rendered items, so a later preview is not a lossless edit of the earlier one.
 - Additional provider-specific integrations remain future work for bags, belts, and jewelry.
@@ -93,7 +93,7 @@ This is a manual check only. It consumes provider units and is never run automat
 4. Confirm the result is labelled `YouCam AI preview`, then select **Use as active outfit**.
 5. Search for a bottom such as baggy jeans in the side panel and confirm **Try this bottom** appears under each result and generates only the selected product's preview from the saved active outfit.
 6. Search for an accessory, select **Add to outfit without preview**, and confirm it appears in the selected-product list without a failed preview.
-7. Select **Finalize outfit and open carts**. Confirm directly addable products appear in the retailer cart and any product needing a size or other choice remains open for completion.
+7. Select **Finalize outfit in this tab**. Confirm the current tab visits each directly addable product and finishes on the last product's retailer cart. Confirm any product needing a size or other choice stops the sequence on its product page.
 8. Select **Reset to original profile photo** and confirm the active outfit and selected-product list are removed.
 
 ## Automated verification
