@@ -6,6 +6,8 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from app.youcam import ProviderTaskState, YouCamClient, YouCamFailure
+
 
 PhotoRole = Literal[
     "face_front", "face_left", "face_right", "upper_body_front", "upper_body_side",
@@ -69,6 +71,8 @@ class BatchInput(BaseModel):
     session_id: str
     profile_id: str
     product_ids: list[str] = Field(min_length=1, max_length=5)
+    assets: list[ProfileAssetInput] = Field(default_factory=list, max_length=11)
+    cloud_consent: bool = False
 
 
 app = FastAPI(title="Yourdrobe Demo API")
@@ -76,6 +80,7 @@ sessions: dict[str, None] = {}
 profiles: dict[str, set[str]] = {}
 products: dict[str, dict] = {}
 jobs: dict[str, dict] = {}
+youcam = YouCamClient.from_environment()
 StoredValue = TypeVar("StoredValue")
 MAX_STORED_ITEMS = 100  # ponytail: per-process demo cap; use persistent storage for a multi-user service
 PLATFORM_HOSTS = {
@@ -101,6 +106,13 @@ PRODUCT_REQUIREMENTS = {
     "ring": (("left_hand_wrist", "right_hand_wrist"),),
     "footwear": (("feet_front",),),
 }
+LIVE_TYPES = ["top", "outerwear", "bottom", "dress"]
+LIVE_MAPPING = {
+    "top": ("upper_body_front", "upper_body"),
+    "outerwear": ("upper_body_front", "upper_body"),
+    "bottom": ("full_body_front", "lower_body"),
+    "dress": ("full_body_front", "full_body"),
+}
 
 
 def new_id(prefix: str) -> str:
@@ -116,6 +128,14 @@ def remember(collection: dict[str, StoredValue], key: str, value: StoredValue) -
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/v1/capabilities")
+def capabilities() -> dict[str, object]:
+    return {
+        "tryon_provider": "youcam" if youcam.enabled else "mock",
+        "live_product_types": LIVE_TYPES if youcam.enabled else [],
+    }
 
 
 @app.post("/v1/sessions")
@@ -185,16 +205,68 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
     if missing:
         raise HTTPException(422, {"code": "missing_profile_assets", "roles": sorted(missing)})
 
+    if not youcam.enabled:
+        created = []
+        for product_id, product in zip(body.product_ids, resolved_products):
+            job_id = new_id("tryon")
+            remember(jobs, job_id, {
+                "job_id": job_id,
+                "product_id": product_id,
+                "result_url": product["image_url"],
+                "created_at": monotonic(),
+                "mock": True,
+            })
+            created.append({"job_id": job_id, "product_id": product_id, "status": "queued"})
+        return {"jobs": created}
+
+    if not body.cloud_consent:
+        raise HTTPException(400, {"code": "live_consent_required"})
+    asset_by_role = {asset.kind: asset.image_data_url for asset in body.assets}
+    missing = {
+        mapping[0] for product in resolved_products
+        if (mapping := LIVE_MAPPING.get(product["product_type"])) and mapping[0] not in asset_by_role
+    }
+    if missing:
+        raise HTTPException(422, {"code": "missing_profile_assets", "roles": sorted(missing)})
+
     created = []
     for product_id, product in zip(body.product_ids, resolved_products):
         job_id = new_id("tryon")
-        remember(jobs, job_id, {
+        mapping = LIVE_MAPPING.get(product["product_type"])
+        if not mapping:
+            job = {
+                "job_id": job_id,
+                "product_id": product_id,
+                "error_code": "unsupported_live_category",
+                "error_message": "Live try-on is not available for this product type.",
+                "mock": False,
+            }
+        else:
+            try:
+                started = youcam.create_clothes_task(asset_by_role[mapping[0]], product["image_url"], mapping[1])
+            except YouCamFailure as failure:
+                job = {
+                    "job_id": job_id,
+                    "product_id": product_id,
+                    "error_code": failure.code,
+                    "error_message": str(failure),
+                    "mock": False,
+                }
+            else:
+                job = {
+                    "job_id": job_id,
+                    "product_id": product_id,
+                    "provider_task_id": started.task_id,
+                    "provider_key_index": started.key_index,
+                    "mock": False,
+                }
+        remember(jobs, job_id, job)
+        created.append({
             "job_id": job_id,
             "product_id": product_id,
-            "result_url": product["image_url"],
-            "created_at": monotonic(),
+            "status": "failed" if "error_code" in job else "queued",
+            **({"error_code": job["error_code"]} if "error_code" in job else {}),
         })
-        created.append({"job_id": job_id, "product_id": product_id, "status": "queued"})
     return {"jobs": created}
 
 
@@ -203,12 +275,41 @@ def get_tryon(job_id: str) -> dict:
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Try-on job not found")
-    if monotonic() - job["created_at"] < 0.25:
+    if job["mock"] and monotonic() - job["created_at"] < 0.25:
         return {"job_id": job_id, "product_id": job["product_id"], "status": "processing", "progress": 50}
+    if job["mock"]:
+        return {
+            "job_id": job_id,
+            "product_id": job["product_id"],
+            "status": "completed",
+            "result_url": job["result_url"],
+            "mock": True,
+        }
+    if "error_code" in job:
+        return {
+            "job_id": job_id,
+            "product_id": job["product_id"],
+            "status": "failed",
+            "error_code": job["error_code"],
+            "error_message": job["error_message"],
+            "mock": False,
+        }
+    state: ProviderTaskState = youcam.get_task(job["provider_task_id"], job["provider_key_index"])
+    if state.status == "processing":
+        return {"job_id": job_id, "product_id": job["product_id"], "status": "processing", "progress": 50, "mock": False}
+    if state.status == "completed":
+        return {
+            "job_id": job_id,
+            "product_id": job["product_id"],
+            "status": "completed",
+            "result_url": state.result_url,
+            "mock": False,
+        }
     return {
         "job_id": job_id,
         "product_id": job["product_id"],
-        "status": "completed",
-        "result_url": job["result_url"],
-        "mock": True,
+        "status": "failed",
+        "error_code": state.error_code or "provider_processing_failed",
+        "error_message": state.error_message or "YouCam could not complete this preview.",
+        "mock": False,
     }
