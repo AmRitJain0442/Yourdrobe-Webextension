@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field, StrictBool, field_validator
 
 from app.youcam import ProviderTaskState, YouCamClient, YouCamFailure
+from app.profile_generation import NanoBananaClient, ProfileGenerationFailure
 
 
 PhotoRole = Literal[
@@ -44,6 +45,11 @@ class ProfileInput(BaseModel):
     assets: list[ProfileAssetInput] = Field(default_factory=list, max_length=11)
     attributes: ProfileAttributesInput = Field(default_factory=ProfileAttributesInput)
     consent: bool
+
+
+class GenerateProfileInput(BaseModel):
+    image_data_url: str = Field(min_length=1, max_length=14_000_000)
+    cloud_consent: StrictBool = False
 
 
 class ProductInput(BaseModel):
@@ -89,6 +95,7 @@ profiles: dict[str, set[str]] = {}
 products: dict[str, dict] = {}
 jobs: dict[str, dict] = {}
 youcam = YouCamClient.from_environment()
+profile_generator = NanoBananaClient.from_environment()
 StoredValue = TypeVar("StoredValue")
 MAX_STORED_ITEMS = 100  # ponytail: per-process demo cap; use persistent storage for a multi-user service
 PLATFORM_HOSTS = {
@@ -168,6 +175,19 @@ def create_profile(body: ProfileInput) -> dict[str, object]:
     profile_id = new_id("profile")
     remember(profiles, profile_id, set(roles))
     return {"profile_id": profile_id, "status": "ready", "roles": roles}
+
+
+@app.post("/v1/profiles/generate-assets")
+def generate_profile_assets(body: GenerateProfileInput) -> dict[str, object]:
+    if not body.cloud_consent:
+        raise HTTPException(400, "Google cloud-processing consent is required")
+    if not profile_generator.enabled:
+        raise HTTPException(503, "Nano Banana profile generation is not configured")
+    try:
+        assets = profile_generator.generate(body.image_data_url)
+    except ProfileGenerationFailure as failure:
+        raise HTTPException(502, str(failure)) from None
+    return {"assets": assets, "generated": True}
 
 
 @app.post("/v1/products/normalize")

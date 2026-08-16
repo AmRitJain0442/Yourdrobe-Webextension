@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 import app.main as main
 from app.main import app, jobs, products, profiles, sessions
 from app.youcam import ProviderTaskState, StartedTask, YouCamFailure
+from app.profile_generation import ProfileGenerationFailure
 
 
 class DisabledYouCam:
@@ -43,16 +44,36 @@ class FakeYouCam:
         return b"rendered", "image/jpeg"
 
 
+class FakeProfileGenerator:
+    enabled = True
+
+    def __init__(self) -> None:
+        self.sources: list[str] = []
+        self.failure: ProfileGenerationFailure | None = None
+
+    def generate(self, source: str) -> list[dict[str, str]]:
+        self.sources.append(source)
+        if self.failure:
+            raise self.failure
+        return [
+            {"kind": role, "image_data_url": f"data:image/jpeg;base64,{role}"}
+            for role in ("face_front", "face_left", "face_right", "full_body_front", "full_body_side")
+        ]
+
+
 class ApiJourneyTest(unittest.TestCase):
     def setUp(self) -> None:
         for collection in (sessions, profiles, products, jobs):
             collection.clear()
         self.saved_youcam = main.youcam
+        self.saved_profile_generator = main.profile_generator
         main.youcam = DisabledYouCam()
+        main.profile_generator = FakeProfileGenerator()
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
         main.youcam = self.saved_youcam
+        main.profile_generator = self.saved_profile_generator
 
     def create_product(self, session_id: str, product_type: str = "top") -> str:
         return self.client.post(
@@ -625,6 +646,28 @@ class ApiJourneyTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["products"][0].get("brand"), "Example Brand")
+
+    def test_generates_the_five_profile_views_from_one_full_body_photo(self) -> None:
+        source = "data:image/jpeg;base64,cGhvdG8="
+        response = self.client.post("/v1/profiles/generate-assets", json={
+            "image_data_url": source,
+            "cloud_consent": True,
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([asset["kind"] for asset in response.json()["assets"]], [
+            "face_front", "face_left", "face_right", "full_body_front", "full_body_side",
+        ])
+        self.assertEqual(main.profile_generator.sources, [source])
+
+    def test_profile_generation_requires_cloud_consent(self) -> None:
+        response = self.client.post("/v1/profiles/generate-assets", json={
+            "image_data_url": "data:image/jpeg;base64,cGhvdG8=",
+            "cloud_consent": False,
+        })
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(main.profile_generator.sources, [])
 
 
 if __name__ == "__main__":
