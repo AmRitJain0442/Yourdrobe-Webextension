@@ -2,21 +2,41 @@
 
 ## Setup
 
-From the repository root, create the backend environment and start the local API:
+From the repository root, create the backend environment and install its dependencies:
 
 ```powershell
 python -m venv backend/.venv
 backend/.venv/Scripts/python.exe -m pip install -r backend/requirements.txt
-$env:PYTHONPATH='backend'
-backend/.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8001
 ```
 
-In a second terminal, install the extension dependencies and build the unpacked extension:
+Install the extension dependencies and build the unpacked extension in a second terminal:
 
 ```powershell
 npm.cmd --prefix extension install
 npm.cmd --prefix extension run build
 ```
+
+### Mock mode (default)
+
+With no YouCam keys configured, the backend keeps local development and test runs offline and returns results labelled `Mock AI preview`:
+
+```powershell
+Remove-Item Env:YOUCAM_API_KEYS -ErrorAction SilentlyContinue
+$env:PYTHONPATH='backend'
+backend/.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8001
+```
+
+### Live YouCam mode
+
+Set one or more real keys only in the backend process environment before starting Uvicorn:
+
+```powershell
+$env:YOUCAM_API_KEYS='first-api-key,second-api-key'
+$env:PYTHONPATH='backend'
+backend/.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8001
+```
+
+Keys are tried in the order listed. Never commit keys, put them in files, or bundle them into the extension; they are read from the backend process environment only.
 
 ## Load the extension in Chrome
 
@@ -26,45 +46,45 @@ npm.cmd --prefix extension run build
 4. Select `extension/dist`.
 5. Open a search or category listing on Amazon India, Amazon US, Flipkart, or Nykaa.
 6. Click the extension action and complete local profile consent.
-7. Confirm all generated imagery is labeled `Mock AI preview` and every product link opens its source listing.
+7. Run the mock or live flow for a supported listing as described below. Product links continue to open their source listing.
 
-## Progressive profile behavior and privacy
+## Live YouCam clothing previews and privacy
 
-- Clicking **Try these products** requests only the missing category-specific photos.
-- Users upload files during this phase; guided camera capture is deferred.
-- Photos are stored as IndexedDB blobs in Chrome, while profile metadata is stored in `chrome.storage.local`.
-- For each try-on/product run, only the required images are sent to the local backend on port `8001`; the backend does not retain them.
-- **Manage profile** replaces or deletes individual photos and can delete the complete profile.
-- Existing single-photo profiles must be assigned a role once. Attributes are optional and stored locally.
-- Product previews remain mocks that reuse product imagery and are labeled `Mock AI preview`.
-- YouCam, cloud profiles, and 3D are not present in this slice.
+- Live YouCam supports clothing only: top, outerwear, bottom, and dress.
+- Unsupported categories show a failure in live mode.
+- `Mock AI preview` appears only when no `YOUCAM_API_KEYS` are configured.
+- Once keys are configured, provider or product-image failures remain failures and never fall back to mock imagery.
+- The first live run requires separate Perfect Corp cloud-processing consent in addition to local profile consent.
+- Profile creation remains file-upload-only; guided camera capture is not implemented.
+- Required profile and retailer product images are sent to Perfect Corp for live processing. Perfect Corp may retain uploaded and generated assets for up to 30 days.
+- Generated result URLs expire after two hours. Yourdrobe does not persist them: live results remain available only for the current side-panel session.
+- Profile photos remain browser-local in Chrome; profile metadata remains in `chrome.storage.local`.
 
-The service-account key is ignored and unused.
+See the official [Clothes V3 API](https://docs.perfectcorp.com/reference/ai_clothes/section/overview) and [file retention period](https://docs.perfectcorp.com/develop/file_retention_period) documentation.
+
+## Manual real-key smoke test
+
+This is a manual check only. It consumes provider units and is never run in CI.
+
+1. In a private shell, configure one real key using the live-mode setup above and start the backend.
+2. Build or reload the unpacked extension.
+3. Open a supported top or dress listing.
+4. Upload the required profile file and accept cloud processing when prompted.
+5. Confirm the result is labelled `YouCam AI preview` and the source listing remains accessible.
+6. Repeat with an intentionally invalid first key followed by the valid key in `YOUCAM_API_KEYS`; confirm the valid key succeeds without exposing either key.
+7. Confirm an invalid product image shows a failure and never `Mock AI preview`.
 
 ## Automated verification
 
-Run these commands from a clean build state:
+Run these commands from the repository root. They use no network provider calls:
 
 ```powershell
 $env:PYTHONPATH='backend'
-backend/.venv/Scripts/python.exe -m unittest backend.tests.test_api -v
+backend\.venv\Scripts\python.exe -m unittest backend.tests.test_youcam backend.tests.test_api -v
 npm.cmd --prefix extension test
 npm.cmd --prefix extension run build
 git diff --check
 git status --short --branch
 ```
 
-Expected results: the backend tests pass, the extension tests pass, the extension build succeeds, `git diff --check` prints nothing, and only the intended README change is uncommitted.
-
-Inspect the generated artifacts and repository status:
-
-```powershell
-Get-Item extension/dist/manifest.json, extension/dist/sidepanel.html, extension/dist/assets/background.js, extension/dist/assets/content.js
-git status --short
-```
-
-All four artifacts should exist. Specification source files may remain untracked because they predate implementation; `my-product-sa-key.json` must not appear.
-
-## Manual browser verification
-
-When Chrome control is available, load `extension/dist` and visit one listing page on each supported site. Record whether product count, title, image, price, and source link are extracted. DOM selectors are site-version-sensitive. If a live page differs from its representative fixture, update only that site's adapter and fixture, then rerun the four adapter tests and the build.
+Expected: both backend modules pass, all extension tests pass, the production build succeeds, `git diff --check` prints nothing, and only the intended documentation change is present before commit.
