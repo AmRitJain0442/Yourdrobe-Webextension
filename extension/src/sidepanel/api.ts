@@ -10,10 +10,9 @@ const maxResultImageBytes = 10 * 1024 * 1024;
 const acceptedResultImageTypes = new Set(["image/jpeg", "image/png"]);
 export type NormalizedProduct = Product & { id: string };
 export type Capabilities = {
-  tryon_provider: "mock" | "youcam" | "google" | "hybrid";
+  tryon_provider: "mock" | "youcam";
   live_product_types: ProductType[];
   youcam_product_types?: ProductType[];
-  google_product_types?: ProductType[];
 };
 
 export class MissingProfileAssetsError extends Error {

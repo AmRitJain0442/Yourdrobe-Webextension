@@ -27,10 +27,9 @@ let root: Root | null;
 let host: HTMLDivElement;
 let fetchMock: ReturnType<typeof vi.fn>;
 let capabilities: {
-  tryon_provider: "mock" | "youcam" | "google" | "hybrid";
+  tryon_provider: "mock" | "youcam";
   live_product_types: ProductType[];
   youcam_product_types?: ProductType[];
-  google_product_types?: ProductType[];
 };
 let batchJob: TryOnJob;
 let onTabUpdated: ((tabId: number, changeInfo: chrome.tabs.OnUpdatedInfo, tab: chrome.tabs.Tab) => void) | undefined;
@@ -90,8 +89,8 @@ async function renderApp() {
   });
 }
 
-function mockCapabilities(tryon_provider: "mock" | "youcam" | "google" | "hybrid", live_product_types: ProductType[], google_product_types: ProductType[] = []) {
-  capabilities = { tryon_provider, live_product_types, google_product_types };
+function mockCapabilities(tryon_provider: "mock" | "youcam", live_product_types: ProductType[]) {
+  capabilities = { tryon_provider, live_product_types };
 }
 
 function mockCompletedJob(overrides: Partial<TryOnJob> = {}) {
@@ -120,7 +119,7 @@ async function click(name: string) {
 
 async function checkYouCamConsentAndAccept() {
   await act(async () => (host.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
-  await click("Agree and create live preview");
+  await click("Continue");
 }
 
 async function completeRun() {
@@ -335,7 +334,7 @@ describe("App", () => {
     expect(host.textContent).toContain("Try this bottom");
   });
 
-  it("previews an accessory on the active outfit with Google", async () => {
+  it("previews an accessory on the active outfit", async () => {
     vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
     vi.mocked(loadProfile).mockResolvedValue({
       ...fullBodyProfile,
@@ -350,7 +349,7 @@ describe("App", () => {
       ok: true,
       products: [{ ...product, title: "Canvas shoulder bag", product_type: "bag", product_url: "https://amazon.in/dp/BAG" }],
     });
-    mockCapabilities("hybrid", ["bag"], ["bag"]);
+    mockCapabilities("youcam", ["bag"]);
     mockCompletedJob({ result_url: "http://127.0.0.1:8001/v1/tryons/job/result-image" });
 
     await renderApp();
@@ -513,7 +512,7 @@ describe("App", () => {
     await renderApp();
     await click("Try these products");
 
-    expect(host.textContent).toContain("Enable live cloud previews");
+    expect(host.textContent).toContain("Enable previews");
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/tryons/batch"))).toBe(false);
   });
 
@@ -544,7 +543,7 @@ describe("App", () => {
     await renderApp();
     await click("Try these products");
 
-    expect(host.textContent).not.toContain("Enable live cloud previews");
+    expect(host.textContent).not.toContain("Enable previews");
     expect(requestBody("/tryons/batch").cloud_consent).toBe(true);
   });
 
@@ -559,7 +558,7 @@ describe("App", () => {
     await renderApp();
     await click("Try these products");
     await act(async () => (host.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
-    await click("Agree and create live preview");
+    await click("Continue");
     expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/capabilities"))).toHaveLength(1);
     act(() => root?.unmount());
     root = null;
@@ -596,8 +595,8 @@ describe("App", () => {
       job_id: "job", product_id: "product", product_type: "dress",
     }), expect.objectContaining({ product_type: "dress" }));
     expect(host.textContent).toContain("Active outfit");
-    expect(host.textContent).toContain("Saved browser-locally on this device.");
-    expect(host.textContent).toContain("uploads this saved image to the selected cloud try-on provider");
+    expect(host.textContent).not.toContain("Saved browser-locally on this device.");
+    expect(host.textContent).not.toContain("Finalizing visits each product");
   });
 
   it("accepts a PNG completed-live image from the local backend", async () => {
@@ -657,11 +656,11 @@ describe("App", () => {
     expect(requestBody("/products/normalize").products).toHaveLength(1);
   });
 
-  it("previews a bag from the full-body profile with Google", async () => {
+  it("previews a bag from the full-body profile", async () => {
     vi.mocked(loadProfile).mockResolvedValue({ ...fullBodyProfile, cloud_tryon_consented_at: "2026-08-16T00:00:00.000Z" });
     vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
     (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "bag" }] });
-    mockCapabilities("google", ["bag"], ["bag"]);
+    mockCapabilities("youcam", ["bag"]);
     mockCompletedJob({ result_url: "http://127.0.0.1:8001/v1/tryons/job/result-image" });
 
     await renderApp();

@@ -211,11 +211,7 @@ export function App() {
       if (request.signal.aborted) return;
       const usesCloudTryon = capabilities.tryon_provider !== "mock"
         && selectedProducts.some((product) => product.product_type && capabilities.live_product_types.includes(product.product_type));
-      const usesGoogle = selectedProducts.some((product) => product.product_type
-        && capabilities.google_product_types?.includes(product.product_type));
-      const hasProviderConsent = usesGoogle
-        ? Boolean(currentProfile?.cloud_tryon_consented_at)
-        : Boolean(currentProfile?.cloud_tryon_consented_at || currentProfile?.youcam_consented_at);
+      const hasProviderConsent = Boolean(currentProfile?.cloud_tryon_consented_at || currentProfile?.youcam_consented_at);
       if (usesCloudTryon && !hasProviderConsent) {
         setConsentError("");
         setPhase("youcam-consent");
@@ -523,8 +519,6 @@ function ActiveOutfitPanel({ outfit, outfits, items, busy, wardrobe = false, onS
       ? <CardFanCarousel cards={outfits.map((saved) => ({ id: saved.metadata.job_id, imgUrl: saved.image_data_url, alt: `Saved outfit ending with ${saved.metadata.product_title}` }))} activeIndex={activeIndex} onSelect={onSelect} />
       : <img src={outfit.image_data_url} alt={`Active outfit: ${outfit.metadata.product_title}`} />}
     <div><h3>{displayed.length} selected {displayed.length === 1 ? "product" : "products"}</h3><ul className="outfit-items">{displayed.map((item) => <li key={item.product_url}><span>{item.title} · {item.product_type}</span>{items.length > 0 && !activeOutfitProductTypes.has(item.product_type) && <button className="text-action" disabled={busy} aria-label={`Remove ${item.title}`} onClick={() => onRemove(item.product_url)}>Remove</button>}</li>)}</ul></div>
-    <p>Saved browser-locally on this device. Using it for another live preview uploads this saved image to the selected cloud try-on provider.</p>
-    <p>Finalizing visits each product in this tab, adds available items, and leaves this tab on the final retailer cart. If an item needs a size, colour, or sign-in, the process stops there for you.</p>
     <button disabled={busy || !items.length} onClick={onFinalize}>Finalize outfit in this tab</button>
     <a href={outfit.metadata.product_url} target="_blank" rel="noreferrer">View original product</a>
     <button className="secondary" disabled={busy} onClick={onReset}>Reset to original profile photo</button>
