@@ -5,12 +5,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prepareProfileImage } from "./image";
 import {
   assignLegacyImage,
+  deleteActiveOutfit,
   deleteAsset,
   deleteLegacyImage,
   deleteProfile,
+  loadActiveOutfit,
   loadLegacyImage,
   loadProfile,
   loadRequiredAssets,
+  saveActiveOutfit,
   saveAsset,
   saveAttributes,
   saveYouCamConsent,
@@ -35,6 +38,19 @@ function rawTransaction<T>(mode: IDBTransactionMode, action: (store: IDBObjectSt
 
 const rawAsset = (role: string) => rawTransaction<Blob | undefined>("readonly", (store) => store.get(role));
 const putRawAsset = (role: string, blob: Blob) => rawTransaction<IDBValidKey>("readwrite", (store) => store.put(blob, role));
+
+const outfitInput = {
+  job_id: "job-top", product_id: "product-top", product_title: "Blue top",
+  product_type: "top" as const, product_url: "https://amazon.in/dp/TOP",
+};
+
+const outfitMetadata = () => ({
+  version: 1 as const,
+  ...outfitInput,
+  mime_type: "image/jpeg" as const,
+  byte_size: 6,
+  saved_at: "2026-08-16T00:00:00.000Z",
+});
 
 beforeEach(async () => {
   values = {};
@@ -94,6 +110,124 @@ async function expectFeetPreserved() {
 }
 
 describe("profile store", () => {
+  it("saves and loads one active outfit without persisting a provider URL", async () => {
+    const providerResult = { ...outfitInput, result_url: "https://provider.example/render.jpg" };
+    const saved = await saveActiveOutfit(new Blob(["render"], { type: "image/jpeg" }), providerResult);
+
+    expect(saved.metadata).toMatchObject({ version: 1, job_id: "job-top", product_type: "top" });
+    expect(saved.image_data_url).toBe("data:image/jpeg;base64,cmVuZGVy");
+    expect(values.yourdrobe_active_outfit_v1).not.toHaveProperty("result_url");
+  });
+
+  it("atomically replaces and resets the active outfit", async () => {
+    await saveActiveOutfit(new Blob(["old"], { type: "image/jpeg" }), outfitInput);
+    await saveActiveOutfit(new Blob(["new"], { type: "image/png" }), { ...outfitInput, job_id: "job-new" });
+
+    expect((await loadActiveOutfit())?.image_data_url).toBe("data:image/png;base64,bmV3");
+    await deleteActiveOutfit();
+    expect(await loadActiveOutfit()).toBeNull();
+  });
+
+  it.each([
+    ["zero-byte", () => new Blob([], { type: "image/jpeg" })],
+    ["non-image", () => new Blob(["render"], { type: "image/webp" })],
+    ["10 MB", () => new Blob([new Uint8Array(10 * 1024 * 1024)], { type: "image/jpeg" })],
+  ])("rejects a %s active outfit before persisting it", async (_label, createBlob) => {
+    await expect(saveActiveOutfit(createBlob(), outfitInput)).rejects.toThrow();
+    expect(values.yourdrobe_active_outfit_v1).toBeUndefined();
+    expect(await rawAsset("active_outfit")).toBeUndefined();
+  });
+
+  it("rejects an undecodable active outfit before persisting it", async () => {
+    vi.mocked(createImageBitmap).mockRejectedValueOnce(new Error("decode failed"));
+
+    await expect(saveActiveOutfit(new Blob(["broken"], { type: "image/jpeg" }), outfitInput)).rejects.toThrow("decode failed");
+    expect(values.yourdrobe_active_outfit_v1).toBeUndefined();
+    expect(await rawAsset("active_outfit")).toBeUndefined();
+  });
+
+  it("closes the decoded active-outfit bitmap", async () => {
+    const close = vi.fn();
+    vi.mocked(createImageBitmap).mockResolvedValueOnce({ width: 800, height: 800, close } as never);
+
+    await saveActiveOutfit(new Blob(["render"], { type: "image/jpeg" }), outfitInput);
+
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("restores the previous active outfit when metadata storage fails", async () => {
+    await saveActiveOutfit(new Blob(["old"], { type: "image/jpeg" }), outfitInput);
+    vi.mocked(chrome.storage.local.set).mockRejectedValueOnce(new Error("storage unavailable"));
+
+    await expect(saveActiveOutfit(new Blob(["new"], { type: "image/png" }), { ...outfitInput, job_id: "job-new" })).rejects.toThrow("storage unavailable");
+    await expect(loadActiveOutfit()).resolves.toMatchObject({
+      metadata: { job_id: "job-top" },
+      image_data_url: "data:image/jpeg;base64,b2xk",
+    });
+  });
+
+  it("restores the active-outfit blob when metadata deletion fails", async () => {
+    await saveActiveOutfit(new Blob(["render"], { type: "image/jpeg" }), outfitInput);
+    vi.mocked(chrome.storage.local.remove).mockRejectedValueOnce(new Error("storage unavailable"));
+
+    await expect(deleteActiveOutfit()).rejects.toThrow("storage unavailable");
+    await expect(loadActiveOutfit()).resolves.toMatchObject({ image_data_url: "data:image/jpeg;base64,cmVuZGVy" });
+  });
+
+  it("cleans active-outfit metadata that points to a missing blob", async () => {
+    await chrome.storage.local.set({ yourdrobe_active_outfit_v1: outfitMetadata() });
+
+    expect(await loadActiveOutfit()).toBeNull();
+    expect(values.yourdrobe_active_outfit_v1).toBeUndefined();
+    expect(await rawAsset("active_outfit")).toBeUndefined();
+  });
+
+  it.each([
+    ["zero-byte", () => new Blob([], { type: "image/jpeg" })],
+    ["non-image", () => new Blob(["render"], { type: "text/plain" })],
+  ])("cleans a %s active-outfit blob and its metadata", async (_label, createBlob) => {
+    await chrome.storage.local.set({ yourdrobe_active_outfit_v1: outfitMetadata() });
+    await putRawAsset("active_outfit", createBlob());
+
+    expect(await loadActiveOutfit()).toBeNull();
+    expect(values.yourdrobe_active_outfit_v1).toBeUndefined();
+    expect(await rawAsset("active_outfit")).toBeUndefined();
+  });
+
+  it("cleans an undecodable active-outfit blob and its metadata", async () => {
+    await chrome.storage.local.set({ yourdrobe_active_outfit_v1: outfitMetadata() });
+    await putRawAsset("active_outfit", new Blob(["broken"], { type: "image/jpeg" }));
+    vi.mocked(createImageBitmap).mockRejectedValueOnce(new Error("decode failed"));
+
+    expect(await loadActiveOutfit()).toBeNull();
+    expect(values.yourdrobe_active_outfit_v1).toBeUndefined();
+    expect(await rawAsset("active_outfit")).toBeUndefined();
+  });
+
+  it("serializes an active-outfit save after complete-profile deletion", async () => {
+    let entered!: () => void;
+    let release!: () => void;
+    const removalEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const removalReleased = new Promise<void>((resolve) => { release = resolve; });
+    vi.mocked(chrome.storage.local.remove).mockImplementationOnce((async (key: string | string[]) => {
+      entered();
+      await removalReleased;
+      for (const item of Array.isArray(key) ? key : [key]) delete values[item];
+    }) as never);
+
+    const deletion = deleteProfile();
+    await removalEntered;
+    let saving!: ReturnType<typeof saveActiveOutfit>;
+    try {
+      saving = saveActiveOutfit(new Blob(["render"], { type: "image/jpeg" }), outfitInput);
+    } finally {
+      release();
+    }
+    await Promise.all([deletion, saving]);
+
+    await expect(loadActiveOutfit()).resolves.toMatchObject({ image_data_url: "data:image/jpeg;base64,cmVuZGVy" });
+  });
+
   it("stores a blob in IndexedDB and metadata in Chrome storage", async () => {
     await saveAsset(face());
     expect((await loadProfile())?.assets.face_front?.width).toBe(800);
@@ -349,15 +483,18 @@ describe("profile store", () => {
   it("deletes a complete profile and its legacy image only when explicitly requested", async () => {
     await saveAsset(face());
     await saveAsset(feet());
+    await saveActiveOutfit(new Blob(["render"], { type: "image/jpeg" }), outfitInput);
     await chrome.storage.local.set({ yourdrobe_profile_image: "data:image/jpeg;base64,cGhvdG8=" });
     vi.clearAllMocks();
     await deleteProfile();
     expect(await loadProfile()).toBeNull();
+    expect(await loadActiveOutfit()).toBeNull();
     expect(await loadLegacyImage()).toBeNull();
     expect(await rawAsset("face_front")).toBeUndefined();
     expect(await rawAsset("feet_front")).toBeUndefined();
+    expect(await rawAsset("active_outfit")).toBeUndefined();
     expect(chrome.storage.local.remove).toHaveBeenCalledOnce();
-    expect(chrome.storage.local.remove).toHaveBeenCalledWith(["yourdrobe_profile_v2", "yourdrobe_profile_image"]);
+    expect(chrome.storage.local.remove).toHaveBeenCalledWith(["yourdrobe_profile_v2", "yourdrobe_profile_image", "yourdrobe_active_outfit_v1"]);
   });
 
   it("deletes the legacy image through its explicit path", async () => {

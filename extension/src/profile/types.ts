@@ -1,3 +1,5 @@
+import type { ProductType } from "../types";
+
 export type PhotoRole =
   | "face_front" | "face_left" | "face_right"
   | "upper_body_front" | "upper_body_side"
@@ -53,3 +55,24 @@ export type ProfileAssetUpload = {
   kind: PhotoRole;
   image_data_url: string;
 };
+
+export type ActiveOutfitMetadata = {
+  version: 1;
+  job_id: string;
+  product_id: string;
+  product_title: string;
+  product_type: ProductType;
+  product_url: string;
+  mime_type: "image/jpeg" | "image/png";
+  byte_size: number;
+  saved_at: string;
+};
+
+export type ActiveOutfit = {
+  metadata: ActiveOutfitMetadata;
+  image_data_url: string;
+};
+
+export type ActiveOutfitInput = Pick<ActiveOutfitMetadata,
+  "job_id" | "product_id" | "product_title" | "product_type" | "product_url"
+>;

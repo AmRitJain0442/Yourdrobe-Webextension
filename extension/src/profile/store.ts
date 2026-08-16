@@ -1,11 +1,15 @@
 import { prepareProfileImage } from "./image";
-import type { PhotoRole, PreparedProfileImage, ProfileAssetUpload, ProfileAttributes, ProfileMetadata } from "./types";
+import type { ActiveOutfit, ActiveOutfitInput, ActiveOutfitMetadata, PhotoRole, PreparedProfileImage, ProfileAssetUpload, ProfileAttributes, ProfileMetadata } from "./types";
 
 const databaseName = "yourdrobe_profile";
 const objectStoreName = "assets";
 const metadataKey = "yourdrobe_profile_v2";
 const legacyKey = "yourdrobe_profile_image";
+const activeOutfitBlobKey = "active_outfit";
+const activeOutfitMetadataKey = "yourdrobe_active_outfit_v1";
 const acceptedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+const acceptedActiveOutfitTypes = new Set(["image/jpeg", "image/png"]);
+const maxActiveOutfitBytes = 10 * 1024 * 1024;
 
 let database: Promise<IDBDatabase> | undefined;
 let profileOperations: Promise<void> = Promise.resolve();
@@ -70,6 +74,28 @@ function dataUrlBlob(data: string): Blob {
   return new Blob([bytes], { type });
 }
 
+async function validateActiveOutfitBlob(blob: Blob): Promise<void> {
+  if (!blob.size) throw new Error("Choose a non-empty image.");
+  if (!acceptedActiveOutfitTypes.has(blob.type)) throw new Error("Use a JPEG or PNG image.");
+  if (blob.size >= maxActiveOutfitBytes) throw new Error("Choose an image smaller than 10 MB.");
+  const bitmap = await createImageBitmap(blob);
+  try {
+    return;
+  } finally {
+    bitmap.close();
+  }
+}
+
+async function removeActiveOutfit(previousBlob?: Blob): Promise<void> {
+  await transaction("readwrite", (store) => store.delete(activeOutfitBlobKey));
+  try {
+    await chrome.storage.local.remove(activeOutfitMetadataKey);
+  } catch (error) {
+    if (previousBlob) await transaction("readwrite", (store) => store.put(previousBlob, activeOutfitBlobKey));
+    throw error;
+  }
+}
+
 export class LocalProfileAssetMissingError extends Error {
   constructor(readonly role: PhotoRole) {
     super(`The local ${role} image is missing.`);
@@ -80,6 +106,60 @@ export class LocalProfileAssetMissingError extends Error {
 export async function loadProfile(): Promise<ProfileMetadata | null> {
   const value = await chrome.storage.local.get(metadataKey);
   return (value[metadataKey] as ProfileMetadata | undefined) ?? null;
+}
+
+export function saveActiveOutfit(blob: Blob, input: ActiveOutfitInput): Promise<ActiveOutfit> {
+  return withProfileLock(async () => {
+    await validateActiveOutfitBlob(blob);
+    const image_data_url = await dataUrl(blob);
+    const previousBlob = await transaction<Blob | undefined>("readonly", (store) => store.get(activeOutfitBlobKey));
+    const metadata: ActiveOutfitMetadata = {
+      version: 1,
+      job_id: input.job_id,
+      product_id: input.product_id,
+      product_title: input.product_title,
+      product_type: input.product_type,
+      product_url: input.product_url,
+      mime_type: blob.type as ActiveOutfitMetadata["mime_type"],
+      byte_size: blob.size,
+      saved_at: new Date().toISOString(),
+    };
+    await transaction("readwrite", (store) => store.put(blob, activeOutfitBlobKey));
+    try {
+      await chrome.storage.local.set({ [activeOutfitMetadataKey]: metadata });
+    } catch (error) {
+      if (previousBlob) await transaction("readwrite", (store) => store.put(previousBlob, activeOutfitBlobKey));
+      else await transaction("readwrite", (store) => store.delete(activeOutfitBlobKey));
+      throw error;
+    }
+    return { metadata, image_data_url };
+  });
+}
+
+export function loadActiveOutfit(): Promise<ActiveOutfit | null> {
+  return withProfileLock(async () => {
+    const value = await chrome.storage.local.get(activeOutfitMetadataKey);
+    const metadata = value[activeOutfitMetadataKey] as ActiveOutfitMetadata | undefined;
+    const blob = await transaction<Blob | undefined>("readonly", (store) => store.get(activeOutfitBlobKey));
+    if (!metadata || !blob) {
+      if (metadata || blob) await removeActiveOutfit(blob);
+      return null;
+    }
+    try {
+      await validateActiveOutfitBlob(blob);
+    } catch {
+      await removeActiveOutfit(blob);
+      return null;
+    }
+    return { metadata, image_data_url: await dataUrl(blob) };
+  });
+}
+
+export function deleteActiveOutfit(): Promise<void> {
+  return withProfileLock(async () => {
+    const previousBlob = await transaction<Blob | undefined>("readonly", (store) => store.get(activeOutfitBlobKey));
+    await removeActiveOutfit(previousBlob);
+  });
 }
 
 async function saveAssetUnlocked(image: PreparedProfileImage): Promise<ProfileMetadata> {
@@ -199,7 +279,7 @@ export function saveYouCamConsent(): Promise<ProfileMetadata> {
 export function deleteProfile(): Promise<void> {
   return withProfileLock(async () => {
     await transaction("readwrite", (store) => store.clear());
-    await chrome.storage.local.remove([metadataKey, legacyKey]);
+    await chrome.storage.local.remove([metadataKey, legacyKey, activeOutfitMetadataKey]);
   });
 }
 
