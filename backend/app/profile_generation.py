@@ -93,7 +93,18 @@ class NanoBananaClient:
         except ProfileGenerationFailure:
             raise
         except Exception as error:
-            raise ProfileGenerationFailure("Nano Banana could not generate the profile photos.") from error
+            status = getattr(error, "status_code", None) or getattr(error, "code", None)
+            messages = {
+                400: "Google could not use that source photo. Try a clear, well-lit full-body photo.",
+                401: "Nano Banana authentication failed. Restart the backend after checking its Google credential.",
+                403: "The Google account cannot use Nano Banana in the configured project.",
+                404: "The configured Nano Banana model is unavailable in this project.",
+                429: "Nano Banana quota is temporarily exhausted. Try again shortly.",
+            }
+            message = messages.get(status)
+            if not message and isinstance(status, int) and status >= 500:
+                message = "Nano Banana is temporarily unavailable. Try again shortly."
+            raise ProfileGenerationFailure(message or "Nano Banana could not generate the profile photos.") from error
 
     @staticmethod
     def _decode_source(value: str) -> tuple[str, bytes]:

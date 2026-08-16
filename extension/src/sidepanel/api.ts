@@ -56,6 +56,9 @@ async function json<T>(path: string, init?: RequestInit, timeoutMs = requestTime
       && (detail as { roles: unknown[] }).roles.every((role) => typeof role === "string")) {
       throw new MissingProfileAssetsError((detail as { roles: RequirementKey[] }).roles);
     }
+    if (path === "/profiles/generate-assets" && typeof detail === "string" && detail.length <= 200) {
+      throw new Error(detail);
+    }
     throw new Error("The local backend could not process the request. Please try again.");
   }
   return body;

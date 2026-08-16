@@ -39,7 +39,27 @@ class FakeGenAI:
         self.models = FakeModels()
 
 
+class ProviderError(Exception):
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+
+
+class FailingModels:
+    def generate_content(self, **kwargs):
+        raise ProviderError(429)
+
+
+class FailingGenAI:
+    models = FailingModels()
+
+
 class NanoBananaClientTest(unittest.TestCase):
+    def test_reports_quota_failures_without_exposing_provider_details(self) -> None:
+        source = "data:image/png;base64," + base64.b64encode(b"source").decode()
+
+        with self.assertRaisesRegex(ProfileGenerationFailure, "quota is temporarily exhausted"):
+            NanoBananaClient(lambda: FailingGenAI()).generate(source)
+
     def test_generates_every_required_role_with_white_background_prompts(self) -> None:
         provider = FakeGenAI()
         client = NanoBananaClient(lambda: provider)

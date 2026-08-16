@@ -49,6 +49,15 @@ describe("startDemo", () => {
 });
 
 describe("generateProfileAssets", () => {
+  it("shows the backend's safe profile-generation failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      detail: "Nano Banana quota is temporarily exhausted. Try again shortly.",
+    }), { status: 502 })));
+
+    await expect(generateProfileAssets("data:image/jpeg;base64,source"))
+      .rejects.toThrow("Nano Banana quota is temporarily exhausted. Try again shortly.");
+  });
+
   it("sends cloud consent and returns all five roles in profile order", async () => {
     const roles = ["full_body_side", "face_right", "full_body_front", "face_left", "face_front"] as const;
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
