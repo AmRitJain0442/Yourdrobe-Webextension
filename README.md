@@ -341,3 +341,146 @@ stateDiagram-v2
 A product that needs a size, a colour, a sign in, or a CAPTCHA stops the sequence on its own
 page for you to finish by hand. Yourdrobe reports it as needing attention rather than counting
 it as added.
+
+---
+
+## Repository layout
+
+```
+.
+├── backend/                          Local FastAPI service, the API key trust boundary
+│   ├── app/
+│   │   ├── main.py                   Endpoints, job orchestration, product host validation
+│   │   ├── youcam.py                 YouCam client: Clothes V3, Shoes, Hat, key rotation
+│   │   └── profile_generation.py     Profile view generation
+│   ├── tests/                        unittest suites for the API, YouCam client, and profiles
+│   ├── requirements.txt
+│   └── .env.example
+├── docs/
+│   ├── assets/                       Logo lockups and mark
+│   └── superpowers/                  Design specs and implementation plans
+└── extension/                        Manifest V3 Chrome extension
+    ├── public/manifest.json
+    ├── src/
+    │   ├── background/               Service worker and the cart sequencer
+    │   ├── content/                  Retailer adapters and the add-to-cart control
+    │   ├── components/ui/            Reusable UI primitives
+    │   ├── profile/                  Local storage, image preparation, asset requirements
+    │   ├── sidepanel/                React side panel and backend client
+    │   └── product-type.ts           Listing title to product type classifier
+    ├── package.json
+    └── vite.config.ts
+```
+
+---
+
+## Prerequisites
+
+| Requirement | Version | Notes |
+| --- | --- | --- |
+| Python | 3.10 or newer | The backend uses `X \| None` type syntax |
+| Node.js | 20 or newer | Required by Vite 8 |
+| Google Chrome | Any current release | Manifest V3 with side panel support |
+| Perfect Corp YouCam API key | One or more | Optional. Without a key the backend runs in mock mode |
+
+The commands below are PowerShell, matching the primary development environment. On macOS or
+Linux, replace `backend/.venv/Scripts/python.exe` with `backend/.venv/bin/python` and set
+environment variables with `export` instead of `$env:`.
+
+---
+
+## Setup
+
+### 1. Backend
+
+From the repository root, create the virtual environment and install dependencies:
+
+```powershell
+python -m venv backend/.venv
+backend/.venv/Scripts/python.exe -m pip install -r backend/requirements.txt
+```
+
+### 2. Extension
+
+In a second terminal, install dependencies and build the unpacked extension:
+
+```powershell
+npm.cmd --prefix extension install
+npm.cmd --prefix extension run build
+```
+
+The build runs `tsc --noEmit` before Vite, so a type error fails the build rather than shipping.
+
+### 3. Load into Chrome
+
+1. Open `chrome://extensions`
+2. Enable **Developer mode**
+3. Choose **Load unpacked**
+4. Select `extension/dist`
+5. Open a search or category listing on Amazon India, Amazon US, Flipkart, or Nykaa
+6. Click the extension action to open the Yourdrobe side panel
+
+---
+
+## Running Yourdrobe
+
+### Mock mode
+
+Mock mode is the default whenever no YouCam key is configured. Every endpoint keeps its normal
+shape, jobs complete with `mock: true`, and results are labelled `Mock AI preview`, so the whole
+flow can be developed and tested without spending provider units.
+
+To force mock mode even when `backend/.env` holds real keys, set a comma-only value in the
+process environment. It takes precedence over the file, parses as zero keys, and leaves
+`backend/.env` untouched:
+
+```powershell
+$env:YOUCAM_API_KEYS=','
+$env:PYTHONPATH='backend'
+backend/.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8001
+```
+
+### Live YouCam mode
+
+Copy the example environment file and add one or more real keys:
+
+```powershell
+Copy-Item backend/.env.example backend/.env
+# Edit backend/.env and set YOUCAM_API_KEYS=first-api-key,second-api-key
+$env:PYTHONPATH='backend'
+backend/.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8001
+```
+
+Keys are tried in the order listed. A process variable overrides the file if you need to switch
+keys without editing it:
+
+```powershell
+$env:YOUCAM_API_KEYS='first-api-key,second-api-key'
+```
+
+Confirm the mode the backend came up in:
+
+```powershell
+curl.exe http://127.0.0.1:8001/v1/capabilities
+```
+
+A live backend reports `"tryon_provider": "youcam"` and lists the live product types. A mock
+backend reports `"tryon_provider": "mock"` with an empty list.
+
+> **Note**
+> Try-on requires a saved profile, and profile creation calls a separate image generation
+> service configured through the profile generation variables in the
+> [configuration reference](#configuration-reference). If those are not set, profile setup
+> returns `503` and the try-on flow cannot be reached. YouCam keys alone are not sufficient to
+> complete a first run from scratch.
+
+### First run
+
+1. Open the side panel on a supported listing and create your profile from one clear, well lit,
+   head to toe photo
+2. Review every generated view before saving, then save the profile
+3. Accept cloud processing when prompted on the first live try-on
+4. Choose a product card and select its try-on action
+5. Save the result with **Add this to active outfit**
+6. Pick the next product and repeat to layer the outfit
+7. Select **Finalize outfit in this tab** to add everything to the retailer cart
