@@ -484,3 +484,84 @@ backend reports `"tryon_provider": "mock"` with an empty list.
 5. Save the result with **Add this to active outfit**
 6. Pick the next product and repeat to layer the outfit
 7. Select **Finalize outfit in this tab** to add everything to the retailer cart
+
+---
+
+## Configuration reference
+
+All configuration is read by the backend process only. Nothing here is bundled into the
+extension, and no endpoint returns any of these values.
+
+### Try-on
+
+| Variable | Required for | Default | Purpose |
+| --- | --- | --- | --- |
+| `YOUCAM_API_KEYS` | Live previews | empty | Comma separated Perfect Corp YouCam keys. Deduplicated, tried in listed order, with automatic failover on `401`, `403`, `429`, and `5xx`. Empty means mock mode |
+
+### Profile generation
+
+Profile creation uses a separate image generation service. These variables gate that step only.
+Refer to [`backend/.env.example`](backend/.env.example) for the current default values.
+
+| Variable | Required for | Purpose |
+| --- | --- | --- |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Profile creation | Absolute path to the service account credential file, kept outside the working tree |
+| `GOOGLE_CLOUD_PROJECT` | Optional | Project override. Detected from the credential when unset |
+| `GOOGLE_CLOUD_LOCATION` | Optional | Region for the generation service |
+| `NANO_BANANA_MODEL` | Optional | Model identifier for the generation service |
+
+Values are loaded from `backend/.env` by default. A process environment variable always takes
+precedence over the file, which is what makes the mock-mode override work without editing
+anything on disk.
+
+> **Warning**
+> Never commit API keys or credential files. `.gitignore` already excludes `.env`,
+> `*-sa-key.json`, and `*-service-account*.json`. Keep credential files outside the working tree
+> and reference them by absolute path.
+
+---
+
+## API reference
+
+The backend listens on `http://127.0.0.1:8001`.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Liveness probe |
+| `GET` | `/v1/capabilities` | Reports whether YouCam is configured and which product types have a live path |
+| `POST` | `/v1/sessions` | Opens a session |
+| `POST` | `/v1/profiles` | Registers the profile photo roles available for a session |
+| `POST` | `/v1/profiles/generate-assets` | Generates the profile views from one source photo |
+| `POST` | `/v1/products/normalize` | Validates and registers products, rejecting any host that does not match its claimed platform |
+| `POST` | `/v1/tryons/batch` | Starts YouCam tasks for the selected products |
+| `GET` | `/v1/tryons/{job_id}` | Polls job status |
+| `GET` | `/v1/tryons/{job_id}/result-image` | Re-hosts a completed YouCam result as verified image bytes |
+
+### Request limits
+
+| Limit | Value | Enforced in |
+| --- | --- | --- |
+| Products per normalize call | 5 | `NormalizeInput` |
+| Products per try-on batch | 5 | `BatchInput.product_ids` |
+| Profile assets per request | 11 | `ProfileInput.assets` |
+| Image data URL length | 14,000,000 characters | `ProfileAssetInput` |
+| Image bytes sent to YouCam | Under 10 MB | `youcam.MAX_IMAGE_BYTES` |
+| Stored sessions, profiles, products, jobs | 100 each, oldest evicted | `MAX_STORED_ITEMS` |
+
+### Error codes
+
+Request level failures are returned as HTTP errors. Provider level failures are attached to the
+job, so one product failing never takes down a batch.
+
+| Code | Level | Meaning |
+| --- | --- | --- |
+| `live_consent_required` | HTTP 400 | Cloud processing consent has not been granted yet |
+| `missing_profile_assets` | HTTP 422 | The profile lacks a photo role the selected products need |
+| `provider_result_unavailable` | HTTP 502 | The result URL failed the host allowlist or the content checks |
+| `youcam_rate_limited` | Job | Every configured key answered `429`. Retry shortly |
+| `youcam_keys_exhausted` | Job | No configured key could start the task. Check the keys |
+| `invalid_user_image` | Job | YouCam could not use the source photo |
+| `invalid_product_image` | Job | YouCam could not use the retailer product image |
+| `provider_safety_rejection` | Job | YouCam rejected the request on safety grounds |
+| `provider_processing_failed` | Job | YouCam could not complete the render |
+| `unsupported_live_category` | Job | The product type has no YouCam path |
