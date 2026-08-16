@@ -57,20 +57,19 @@ describe("ProfileSetup", () => {
     await renderSetup();
 
     expect(host.querySelectorAll('input[type="file"]')).toHaveLength(1);
-    expect(host.textContent).toContain("One full-body photo");
-    expect(host.textContent).toContain("white-background profile set");
+    expect(host.textContent).toContain("Upload a clear, well-lit, head-to-toe photo.");
     expect(host.textContent).not.toContain("Height (cm)");
   });
 
-  it("requires explicit Google cloud consent before generation", async () => {
+  it("requires explicit cloud consent before generation", async () => {
     await renderSetup();
     await act(async () => {
       choose();
     });
-    await click("Generate profile photos");
+    await click("Create profile");
 
     expect(generateProfileAssets).not.toHaveBeenCalled();
-    expect(host.querySelector('[role="alert"]')?.textContent).toContain("Google Vertex AI");
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("profile photo processing");
   });
 
   it("previews all five generated images before saving them locally", async () => {
@@ -79,14 +78,14 @@ describe("ProfileSetup", () => {
       choose();
       (host.querySelector('input[type="checkbox"]') as HTMLInputElement).click();
     });
-    await click("Generate profile photos");
+    await click("Create profile");
 
     await vi.waitFor(() => expect(generateProfileAssets).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(host.querySelectorAll(".generated-profile img")).toHaveLength(5));
-    expect(host.textContent).toContain("AI-generated");
+    expect(host.textContent).toContain("Review your profile");
     expect(saveAsset).not.toHaveBeenCalled();
 
-    await click("Save generated profile");
+    await click("Save profile");
     expect(saveAsset).toHaveBeenCalledTimes(5);
     expect(roles.map((role, index) => vi.mocked(saveAsset).mock.calls[index][0].metadata.role)).toEqual([...roles]);
     expect(onSaved).toHaveBeenCalledOnce();
@@ -102,7 +101,7 @@ describe("ProfileSetup", () => {
       choose();
       (host.querySelector('input[type="checkbox"]') as HTMLInputElement).click();
     });
-    await click("Generate profile photos");
+    await click("Create profile");
 
     await vi.waitFor(() => expect(host.textContent).toContain("Generated face photo was invalid."));
     expect(saveAsset).not.toHaveBeenCalled();
