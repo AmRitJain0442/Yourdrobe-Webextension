@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { ExtractProductsResponse, Product, ProductType, TryOnJob } from "../types";
 import { missingRequirements, profilePhotoRoles, requirementsForProducts, rolesForRequirement } from "../profile/requirements";
-import { deleteActiveOutfit, LocalProfileAssetMissingError, loadActiveOutfit, loadLegacyImage, loadOutfitItems, loadOutfitVersions, loadProfile, loadRequiredAssets, removeOutfitItem, saveCompiledOutfit, saveOutfitItem, saveYouCamConsent, selectOutfitVersion } from "../profile/store";
+import { deleteActiveOutfit, LocalProfileAssetMissingError, loadActiveOutfit, loadLegacyImage, loadOutfitItems, loadOutfitVersions, loadProfile, loadRequiredAssets, removeOutfitItem, saveCompiledOutfit, saveYouCamConsent, selectOutfitVersion } from "../profile/store";
 import type { ActiveOutfit, CompiledOutfit, OutfitItem, PhotoRole, ProfileMetadata, RequirementKey } from "../profile/types";
 import CardFanCarousel from "../components/ui/card-fan-carousel";
 import { getCapabilities, getJob, getResultImage, MissingProfileAssetsError, startDemo, type NormalizedProduct } from "./api";
@@ -19,16 +19,20 @@ const pollDelayMs = 2_000;
 const pollDeadlineMs = 80_000;
 const productPageSize = 25;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const isHttpsUrl = (value?: string) => {
+const isResultUrl = (value?: string) => {
   if (!value) return false;
-  try { return new URL(value).protocol === "https:"; }
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:"
+      || (url.origin === "http://127.0.0.1:8001" && /^\/v1\/tryons\/[^/]+\/result-image$/.test(url.pathname));
+  }
   catch { return false; }
 };
 const selectableProductTypes: ProductType[] = [
   "makeup", "eyewear", "headwear", "earrings", "necklace", "top", "outerwear",
   "dress", "bottom", "belt", "bag", "watch", "bracelet", "ring", "footwear",
 ];
-const activeOutfitProductTypes = new Set<ProductType>(["top", "outerwear", "bottom", "dress", "footwear"]);
+const activeOutfitProductTypes = new Set<ProductType>(selectableProductTypes);
 type ShoeGender = "" | "female" | "male";
 type SearchStore = Product["platform"];
 const searchStores: { value: SearchStore; label: string; url: (query: string) => string }[] = [
@@ -37,10 +41,6 @@ const searchStores: { value: SearchStore; label: string; url: (query: string) =>
   { value: "flipkart", label: "Flipkart", url: (query) => `https://www.flipkart.com/search?q=${query}` },
   { value: "nykaa", label: "Nykaa", url: (query) => `https://www.nykaa.com/search/result/?q=${query}` },
 ];
-const requiresOriginalFullBody = (products: Product[]) => products.some((product) =>
-  !activeOutfitProductTypes.has(product.product_type ?? "unknown")
-  && requirementsForProducts([product]).includes("full_body_front"),
-);
 async function extractProducts(tabId?: number) {
   if (!tabId) {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -192,7 +192,7 @@ export function App() {
     const outfitBaseImageDataUrl = activeOutfit && selectedProducts.some((product) => activeOutfitProductTypes.has(product.product_type ?? "unknown"))
       ? activeOutfit.image_data_url
       : undefined;
-    const activeOutfitReplacesFullBody = Boolean(outfitBaseImageDataUrl) && !requiresOriginalFullBody(selectedProducts);
+    const activeOutfitReplacesFullBody = Boolean(outfitBaseImageDataUrl);
     const availableRoles = Object.keys(currentProfile?.assets ?? {}) as PhotoRole[];
     if (activeOutfitReplacesFullBody) availableRoles.push("full_body_front");
     const required = missingRequirements(selectedProducts, availableRoles);
@@ -211,9 +211,14 @@ export function App() {
     try {
       const capabilities = await getCapabilities(request.signal);
       if (request.signal.aborted) return;
-      const usesYouCam = capabilities.tryon_provider === "youcam"
+      const usesCloudTryon = capabilities.tryon_provider !== "mock"
         && selectedProducts.some((product) => product.product_type && capabilities.live_product_types.includes(product.product_type));
-      if (usesYouCam && !currentProfile?.youcam_consented_at) {
+      const usesGoogle = selectedProducts.some((product) => product.product_type
+        && capabilities.google_product_types?.includes(product.product_type));
+      const hasProviderConsent = usesGoogle
+        ? Boolean(currentProfile?.cloud_tryon_consented_at)
+        : Boolean(currentProfile?.cloud_tryon_consented_at || currentProfile?.youcam_consented_at);
+      if (usesCloudTryon && !hasProviderConsent) {
         setConsentError("");
         setPhase("youcam-consent");
         return;
@@ -225,7 +230,7 @@ export function App() {
         rolesForRequirement(requirement).find((role) => available.has(role)) ?? rolesForRequirement(requirement)[0],
       );
       const assets = await loadRequiredAssets(roles);
-      const started = await startDemo(assets, currentProfile?.attributes ?? {}, selectedProducts, Boolean(currentProfile?.youcam_consented_at), outfitBaseImageDataUrl, request.signal);
+      const started = await startDemo(assets, currentProfile?.attributes ?? {}, selectedProducts, Boolean(currentProfile?.cloud_tryon_consented_at || currentProfile?.youcam_consented_at), outfitBaseImageDataUrl, request.signal);
       if (request.signal.aborted) return;
       pollDeadline = new AbortController();
       pollDeadlineTimer = setTimeout(
@@ -351,29 +356,6 @@ export function App() {
     }
   }
 
-  async function addWithoutPreview(product: Product) {
-    const item = outfitItem(product);
-    if (!activeOutfit || !item || outfitMutation.current) return;
-    outfitMutation.current = true;
-    setOutfitBusy(true);
-    setOutfitStatus("Adding product to outfit...");
-    setOutfitError("");
-    try {
-      const nextItems = await saveOutfitItem(item);
-      if (!mounted.current) return;
-      setOutfitItems(nextItems);
-      setOutfitVersions(await loadOutfitVersions());
-      setOutfitStatus("Product added without a generated preview.");
-    } catch (reason) {
-      if (!mounted.current) return;
-      setOutfitStatus("");
-      setOutfitError(reason instanceof Error ? reason.message : "We could not add that product.");
-    } finally {
-      outfitMutation.current = false;
-      if (mounted.current) setOutfitBusy(false);
-    }
-  }
-
   function previewProduct(product: Product) {
     let selected = product;
     if (product.product_type === "footwear") {
@@ -474,10 +456,8 @@ export function App() {
       <div className="section-heading"><div><span className="eyebrow">Shop this page</span><h2>{products.length} products ready</h2></div><span className="result-count">{productPage * productPageSize + 1}–{Math.min((productPage + 1) * productPageSize, products.length)}</span></div>
       <div className="list product-page">{visibleProducts.map((product, index) => <div className="catalog-item" key={product.product_url}><ProductRow product={product} />
         {(!product.product_type || product.product_type === "unknown") && <label>Choose product type for {product.title}<select required value={product.product_type ?? "unknown"} onChange={(event) => setProducts((current) => current.map((item, itemIndex) => itemIndex === productPage * productPageSize + index ? { ...item, product_type: event.target.value as ProductType } : item))}><option value="unknown">Choose product type</option>{selectableProductTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
-        {activeOutfit && product.product_type && product.product_type !== "unknown" && !activeOutfitProductTypes.has(product.product_type) && <button className="secondary" disabled={outfitBusy} onClick={() => void addWithoutPreview(product)}>Add to outfit without preview</button>}
         {product.product_type === "footwear" && <label>Shoe preview model<select aria-label="Shoe preview model" value={shoeGenders[product.product_url] ?? ""} onChange={(event) => setShoeGenders((current) => ({ ...current, [product.product_url]: event.target.value as ShoeGender }))}><option value="">Choose Women or Men</option><option value="female">Women</option><option value="male">Men</option></select></label>}
         {product.product_type && product.product_type !== "unknown" && activeOutfitProductTypes.has(product.product_type) && <button className="ai-button" disabled={outfitBusy || (product.product_type === "footwear" && !shoeGenders[product.product_url])} onClick={() => previewProduct(product)}>{product.product_type === "footwear" ? "Try these shoes" : `Try this ${product.product_type}`}</button>}
-        {!activeOutfit && product.product_type && product.product_type !== "unknown" && !activeOutfitProductTypes.has(product.product_type) && <p className="preview-unavailable">AI preview is not available for {product.product_type} with the current provider.</p>}
       </div>)}</div>
       {productPageCount > 1 && <nav className="product-pagination" aria-label="Product pages">
         <button className="secondary" disabled={productPage === 0} onClick={() => setProductPage((page) => page - 1)}>Previous page</button>
@@ -490,13 +470,13 @@ export function App() {
       {phase === "results" && <section className="results-section">
       <div className="section-heading"><div><span className="eyebrow">AI fitting room</span><h2>Your previews</h2></div><span aria-hidden="true">✦</span></div>
       <div className="list preview-strip">{results.map(({ product, job }) => {
-        const failed = job.status === "failed" || (job.mock === false && !isHttpsUrl(job.result_url));
+        const failed = job.status === "failed" || (job.mock === false && !isResultUrl(job.result_url));
         return <article className="product" key={job.job_id}>
-          <div><span className="badge">{job.mock === false ? "YouCam AI preview" : "Mock AI preview"}</span><h3>{product.title}</h3></div>
+          <div><span className="badge">{job.mock === false ? "Live AI preview" : "Mock AI preview"}</span><h3>{product.title}</h3></div>
           {failed
             ? <p className="error">{job.error_message ?? "This product preview failed. You can still view the original listing."}</p>
             : <img src={job.result_url || product.image_url} alt={`Preview of ${product.title}`} />}
-          {job.status === "completed" && job.mock === false && isHttpsUrl(job.result_url) && <button className="ai-button" disabled={outfitBusy} onClick={() => void useAsActiveOutfit({ product, job })}>Add this to active outfit</button>}
+          {job.status === "completed" && job.mock === false && isResultUrl(job.result_url) && <button className="ai-button" disabled={outfitBusy} onClick={() => void useAsActiveOutfit({ product, job })}>Add this to active outfit</button>}
           <a className="button secondary" href={product.product_url} target="_blank" rel="noreferrer">View original product</a>
         </article>;
       })}</div>
@@ -529,7 +509,7 @@ function ActiveOutfitPanel({ outfit, outfits, items, busy, wardrobe = false, onS
       ? <CardFanCarousel cards={outfits.map((saved) => ({ id: saved.metadata.job_id, imgUrl: saved.image_data_url, alt: `Saved outfit ending with ${saved.metadata.product_title}` }))} activeIndex={activeIndex} onSelect={onSelect} />
       : <img src={outfit.image_data_url} alt={`Active outfit: ${outfit.metadata.product_title}`} />}
     <div><h3>{displayed.length} selected {displayed.length === 1 ? "product" : "products"}</h3><ul className="outfit-items">{displayed.map((item) => <li key={item.product_url}><span>{item.title} · {item.product_type}</span>{items.length > 0 && !activeOutfitProductTypes.has(item.product_type) && <button className="text-action" disabled={busy} aria-label={`Remove ${item.title}`} onClick={() => onRemove(item.product_url)}>Remove</button>}</li>)}</ul></div>
-    <p>Saved browser-locally on this device. Using it for another live preview uploads this saved image to Perfect Corp.</p>
+    <p>Saved browser-locally on this device. Using it for another live preview uploads this saved image to the selected cloud try-on provider.</p>
     <p>Finalizing visits each product in this tab, adds available items, and leaves this tab on the final retailer cart. If an item needs a size, colour, or sign-in, the process stops there for you.</p>
     <button disabled={busy || !items.length} onClick={onFinalize}>Finalize outfit in this tab</button>
     <a href={outfit.metadata.product_url} target="_blank" rel="noreferrer">View original product</a>

@@ -24,16 +24,17 @@ afterEach(() => {
 });
 
 describe("YouCamConsent", () => {
-  it("requires the Perfect Corp acknowledgement before accepting", async () => {
+  it("requires cloud-provider acknowledgement before accepting", async () => {
     const onAccept = vi.fn();
     await act(async () => root.render(<YouCamConsent busy={false} error="" onAccept={onAccept} onCancel={vi.fn()} />));
     const accept = screenButton("Agree and create live preview");
     expect(host.textContent).toContain("Perfect Corp");
+    expect(host.textContent).toContain("Google Vertex AI");
     expect(host.textContent).toContain("up to 30 days");
-    expect(host.textContent).toContain("download URL is temporary");
-    expect(host.textContent).toContain("Unless you choose Use as active outfit");
+    expect(host.textContent).toContain("result links can be temporary");
+    expect(host.textContent).toContain("Unless you choose Add this to active outfit");
     expect(host.textContent).toContain("stored browser-locally");
-    expect(host.textContent).toContain("uploaded to Perfect Corp");
+    expect(host.textContent).toContain("uploaded to the selected provider");
     expect(accept.disabled).toBe(true);
     await act(async () => (host.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
     expect(accept.disabled).toBe(false);

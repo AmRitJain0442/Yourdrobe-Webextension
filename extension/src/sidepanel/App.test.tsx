@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { deleteActiveOutfit, deleteProfile, LocalProfileAssetMissingError, loadActiveOutfit, loadOutfitItems, loadOutfitVersions, loadProfile, loadRequiredAssets, removeOutfitItem, saveCompiledOutfit, saveOutfitItem, saveYouCamConsent, selectOutfitVersion } from "../profile/store";
+import { deleteActiveOutfit, deleteProfile, LocalProfileAssetMissingError, loadActiveOutfit, loadOutfitItems, loadOutfitVersions, loadProfile, loadRequiredAssets, removeOutfitItem, saveCompiledOutfit, saveYouCamConsent, selectOutfitVersion } from "../profile/store";
 import type { ActiveOutfit, ProfileMetadata } from "../profile/types";
 import type { ProductType, TryOnJob } from "../types";
 import { getResultImage } from "./api";
@@ -16,7 +16,6 @@ vi.mock("../profile/store", () => ({
   loadOutfitVersions: vi.fn(),
   saveCompiledOutfit: vi.fn(),
   selectOutfitVersion: vi.fn(),
-  saveOutfitItem: vi.fn(),
   removeOutfitItem: vi.fn(),
   deleteActiveOutfit: vi.fn(),
   deleteProfile: vi.fn(),
@@ -27,7 +26,12 @@ vi.mock("../profile/store", () => ({
 let root: Root | null;
 let host: HTMLDivElement;
 let fetchMock: ReturnType<typeof vi.fn>;
-let capabilities: { tryon_provider: "mock" | "youcam"; live_product_types: ProductType[] };
+let capabilities: {
+  tryon_provider: "mock" | "youcam" | "google" | "hybrid";
+  live_product_types: ProductType[];
+  youcam_product_types?: ProductType[];
+  google_product_types?: ProductType[];
+};
 let batchJob: TryOnJob;
 let onTabUpdated: ((tabId: number, changeInfo: chrome.tabs.OnUpdatedInfo, tab: chrome.tabs.Tab) => void) | undefined;
 const product = {
@@ -86,8 +90,8 @@ async function renderApp() {
   });
 }
 
-function mockCapabilities(tryon_provider: "mock" | "youcam", live_product_types: ProductType[]) {
-  capabilities = { tryon_provider, live_product_types };
+function mockCapabilities(tryon_provider: "mock" | "youcam" | "google" | "hybrid", live_product_types: ProductType[], google_product_types: ProductType[] = []) {
+  capabilities = { tryon_provider, live_product_types, google_product_types };
 }
 
 function mockCompletedJob(overrides: Partial<TryOnJob> = {}) {
@@ -150,7 +154,6 @@ beforeEach(() => {
   vi.mocked(loadOutfitVersions).mockResolvedValue([]);
   vi.mocked(saveCompiledOutfit).mockResolvedValue({ active: activeDress, items: [], outfits: [{ ...activeDress, items: [] }] });
   vi.mocked(selectOutfitVersion).mockResolvedValue({ ...activeTop, items: [] });
-  vi.mocked(saveOutfitItem).mockImplementation(async (item) => [item]);
   vi.mocked(removeOutfitItem).mockResolvedValue([]);
   vi.mocked(deleteActiveOutfit).mockResolvedValue();
   vi.mocked(deleteProfile).mockResolvedValue();
@@ -306,28 +309,27 @@ describe("App", () => {
     expect(host.textContent).toContain("Try this bottom");
   });
 
-  it("adds an unsupported accessory to the outfit without requesting a failed preview", async () => {
+  it("previews an accessory on the active outfit with Google", async () => {
     vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    vi.mocked(loadProfile).mockResolvedValue({ ...fullBodyProfile, cloud_tryon_consented_at: "2026-08-16T00:00:00.000Z" });
     vi.mocked(loadOutfitItems).mockResolvedValue([{
       platform: "amazon_in", title: "Saved linen top", product_type: "top",
       product_url: activeTop.metadata.product_url, image_url: "https://example.com/top.jpg",
     }]);
-    vi.mocked(saveOutfitItem).mockImplementation(async (item) => [
-      { platform: "amazon_in", title: "Saved linen top", product_type: "top", product_url: activeTop.metadata.product_url, image_url: "https://example.com/top.jpg" },
-      item,
-    ]);
     (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       products: [{ ...product, title: "Canvas shoulder bag", product_type: "bag", product_url: "https://amazon.in/dp/BAG" }],
     });
+    mockCapabilities("hybrid", ["bag"], ["bag"]);
+    mockCompletedJob({ result_url: "http://127.0.0.1:8001/v1/tryons/job/result-image" });
 
     await renderApp();
-    await click("Add to outfit without preview");
+    await click("Try this bag");
 
-    expect(saveOutfitItem).toHaveBeenCalledWith(expect.objectContaining({ title: "Canvas shoulder bag", product_type: "bag" }));
-    expect(host.textContent).toContain("2 selected products");
-    expect(host.textContent).toContain("Canvas shoulder bag");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(loadRequiredAssets).toHaveBeenCalledWith([]);
+    expect(requestBody("/tryons/batch").outfit_base_image_data_url).toBe("data:image/jpeg;base64,active");
+    expect(requestBody("/products/normalize").products).toEqual([expect.objectContaining({ product_type: "bag" })]);
+    expect(host.textContent).toContain("Live AI preview");
   });
 
   it("offers a shoe preview that continues from the active outfit", async () => {
@@ -458,7 +460,7 @@ describe("App", () => {
     await renderApp();
     await click("Try these products");
 
-    expect(host.textContent).toContain("Enable live YouCam previews");
+    expect(host.textContent).toContain("Enable live cloud previews");
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/tryons/batch"))).toBe(false);
   });
 
@@ -489,7 +491,7 @@ describe("App", () => {
     await renderApp();
     await click("Try these products");
 
-    expect(host.textContent).not.toContain("Enable live YouCam previews");
+    expect(host.textContent).not.toContain("Enable live cloud previews");
     expect(requestBody("/tryons/batch").cloud_consent).toBe(true);
   });
 
@@ -524,7 +526,7 @@ describe("App", () => {
 
     await completeRun();
 
-    expect(host.textContent).toContain("YouCam AI preview");
+    expect(host.textContent).toContain("Live AI preview");
     expect(host.textContent).not.toContain("Mock AI preview");
     expect(host.querySelector<HTMLImageElement>(".results-section img")?.alt).toBe("Preview of Daily essential");
     expect(JSON.stringify((chrome.storage.local.set as ReturnType<typeof vi.fn>).mock.calls)).not.toContain("provider.example/result.jpg");
@@ -542,7 +544,7 @@ describe("App", () => {
     }), expect.objectContaining({ product_type: "dress" }));
     expect(host.textContent).toContain("Active outfit");
     expect(host.textContent).toContain("Saved browser-locally on this device.");
-    expect(host.textContent).toContain("uploads this saved image to Perfect Corp");
+    expect(host.textContent).toContain("uploads this saved image to the selected cloud try-on provider");
   });
 
   it("accepts a PNG completed-live image from the local backend", async () => {
@@ -602,22 +604,23 @@ describe("App", () => {
     expect(requestBody("/products/normalize").products).toHaveLength(1);
   });
 
-  it("adds a bag without sending either profile or active-outfit images to the preview backend", async () => {
-    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
-    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+  it("previews a bag from the full-body profile with Google", async () => {
+    vi.mocked(loadProfile).mockResolvedValue({ ...fullBodyProfile, cloud_tryon_consented_at: "2026-08-16T00:00:00.000Z" });
     vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
     (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "bag" }] });
+    mockCapabilities("google", ["bag"], ["bag"]);
+    mockCompletedJob({ result_url: "http://127.0.0.1:8001/v1/tryons/job/result-image" });
 
     await renderApp();
-    expect(host.querySelector("article.active-outfit")?.textContent).toContain("Saved linen top");
-    await click("Add to outfit without preview");
+    await click("Try this bag");
 
-    expect(saveOutfitItem).toHaveBeenCalledWith(expect.objectContaining({ product_type: "bag" }));
-    expect(loadRequiredAssets).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(loadRequiredAssets).toHaveBeenCalledWith(["full_body_front"]);
+    expect(requestBody("/tryons/batch").assets).toEqual([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    expect(requestBody("/tryons/batch").outfit_base_image_data_url).toBeUndefined();
+    expect(host.textContent).toContain("Live AI preview");
   });
 
-  it("previews clothing from the active base while leaving a mixed-in bag for selection without preview", async () => {
+  it("offers individual previews for clothing and accessories", async () => {
     vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
     vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
     vi.mocked(loadRequiredAssets).mockImplementation(async (roles) => roles.length ? [{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }] : []);
@@ -628,7 +631,8 @@ describe("App", () => {
 
     await renderApp();
     expect(host.querySelector("article.active-outfit")?.textContent).toContain("Saved linen top");
-    expect(host.textContent).toContain("Add to outfit without preview");
+    expect(host.textContent).toContain("Try this top");
+    expect(host.textContent).toContain("Try this bag");
     await click("Try these products");
 
     const batch = requestBody("/tryons/batch");

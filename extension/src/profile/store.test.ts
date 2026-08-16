@@ -459,14 +459,16 @@ describe("profile store", () => {
     expect(result.attributes).toEqual({ waist_cm: 70, top_size: "M" });
   });
 
-  it("records separate YouCam consent only on an existing profile", async () => {
+  it("records cloud-provider consent only on an existing profile", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-16T00:00:00.000Z"));
     try {
       await saveAttributes({ top_size: "M" });
       const result = await saveYouCamConsent();
       expect(result.youcam_consented_at).toBe("2026-08-16T00:00:00.000Z");
+      expect(result.cloud_tryon_consented_at).toBe("2026-08-16T00:00:00.000Z");
       expect((await loadProfile())?.youcam_consented_at).toBe("2026-08-16T00:00:00.000Z");
+      expect((await loadProfile())?.cloud_tryon_consented_at).toBe("2026-08-16T00:00:00.000Z");
     } finally {
       vi.useRealTimers();
     }

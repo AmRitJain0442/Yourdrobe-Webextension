@@ -42,6 +42,7 @@ export type ProfileMetadata = {
   version: 2;
   consented_at: string;
   youcam_consented_at?: string;
+  cloud_tryon_consented_at?: string;
   assets: Partial<Record<PhotoRole, ProfileAssetMetadata>>;
   attributes: ProfileAttributes;
 };

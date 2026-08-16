@@ -12,7 +12,7 @@ describe("profile requirements", () => {
   it("deduplicates a mixed batch in stable order", () => {
     expect(requirementsForProducts([
       product("makeup"), product("eyewear"), product("dress"), product("watch"), product("footwear"),
-    ])).toEqual(["face_front", "full_body_front"]);
+    ])).toEqual(["full_body_front"]);
   });
 
   it("requires one full-body image for every live clothing type", () => {

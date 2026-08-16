@@ -489,7 +489,8 @@ export function saveYouCamConsent(): Promise<ProfileMetadata> {
   return withProfileLock(async () => {
     const profile = await loadProfile();
     if (!profile) throw new Error("Create your local profile first.");
-    const next = { ...profile, youcam_consented_at: new Date().toISOString() };
+    const consentedAt = new Date().toISOString();
+    const next = { ...profile, youcam_consented_at: consentedAt, cloud_tryon_consented_at: consentedAt };
     await saveMetadata(next);
     return next;
   });
