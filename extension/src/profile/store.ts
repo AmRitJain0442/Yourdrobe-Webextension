@@ -130,7 +130,17 @@ export function loadRequiredAssets(roles: PhotoRole[]): Promise<ProfileAssetUplo
       let bitmap: ImageBitmap | undefined;
       try {
         bitmap = await createImageBitmap(blob);
-        uploads.push({ kind: role, image_data_url: await dataUrl(blob) });
+        let uploadBlob = blob;
+        if (blob.type === "image/webp") {
+          const canvas = document.createElement("canvas");
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("We could not process that image.");
+          context.drawImage(bitmap, 0, 0);
+          uploadBlob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((jpeg) => jpeg ? resolve(jpeg) : reject(new Error("We could not process that image.")), "image/jpeg", 0.9));
+        }
+        uploads.push({ kind: role, image_data_url: await dataUrl(uploadBlob) });
       } catch {
         await removeCorruptAsset(profile, role, blob);
       } finally {
@@ -169,6 +179,16 @@ export function saveAttributes(attributes: ProfileAttributes): Promise<ProfileMe
       else (nextAttributes as Record<string, unknown>)[key] = value;
     }
     const next = { ...profile, attributes: nextAttributes };
+    await saveMetadata(next);
+    return next;
+  });
+}
+
+export function saveYouCamConsent(): Promise<ProfileMetadata> {
+  return withProfileLock(async () => {
+    const profile = await loadProfile();
+    if (!profile) throw new Error("Create your local profile first.");
+    const next = { ...profile, youcam_consented_at: new Date().toISOString() };
     await saveMetadata(next);
     return next;
   });

@@ -13,6 +13,7 @@ import {
   loadRequiredAssets,
   saveAsset,
   saveAttributes,
+  saveYouCamConsent,
 } from "./store";
 
 let values: Record<string, unknown>;
@@ -225,6 +226,35 @@ describe("profile store", () => {
     await saveAttributes({ height_cm: 170, waist_cm: 70 });
     const result = await saveAttributes({ height_cm: undefined, top_size: "M" });
     expect(result.attributes).toEqual({ waist_cm: 70, top_size: "M" });
+  });
+
+  it("records separate YouCam consent only on an existing profile", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-16T00:00:00.000Z"));
+    try {
+      await saveAttributes({ top_size: "M" });
+      const result = await saveYouCamConsent();
+      expect(result.youcam_consented_at).toBe("2026-08-16T00:00:00.000Z");
+      expect((await loadProfile())?.youcam_consented_at).toBe("2026-08-16T00:00:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not manufacture a profile while recording YouCam consent", async () => {
+    await expect(saveYouCamConsent()).rejects.toThrow("Create your local profile first.");
+    expect(await loadProfile()).toBeNull();
+  });
+
+  it("converts stored WebP to JPEG only for a provider upload", async () => {
+    await saveAsset(face(new Blob(["webp"], { type: "image/webp" })));
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: vi.fn() } as never);
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback) => callback?.(new Blob(["jpeg"], { type: "image/jpeg" })));
+
+    const uploads = await loadRequiredAssets(["face_front"]);
+
+    expect(uploads[0].image_data_url).toBe("data:image/jpeg;base64,anBlZw==");
+    expect((await rawAsset("face_front"))?.type).toBe("image/webp");
   });
 
   it("serializes concurrent saves so neither metadata entry is lost", async () => {
