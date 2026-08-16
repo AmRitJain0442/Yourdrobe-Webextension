@@ -55,7 +55,7 @@ $env:YOUCAM_API_KEYS='first-api-key,second-api-key'
 6. Click the extension action, upload the five required profile photos, and complete local profile consent.
 7. Run the mock or live flow for a supported listing as described below. Product links continue to open their source listing.
 
-The side panel can search Amazon India, Amazon US, Flipkart, or Nykaa for you. Choose a store, enter a product query, and Yourdrobe navigates the current tab to that store's search page before showing up to five retailer-ranked results in the panel. When an active outfit is saved and the new results include clothing, the action changes to **Add these products to active outfit**.
+The side panel can search Amazon India, Amazon US, Flipkart, or Nykaa for you. Choose a store, enter a product query, and Yourdrobe navigates the current tab to that store's search page before showing up to five retailer-ranked results in the panel. Each supported clothing card has its own **Try this top**, **Try this bottom**, **Try this dress**, or **Try this outerwear** action, so only the selected item generates a preview.
 
 ## Live YouCam clothing previews and privacy
 
@@ -70,7 +70,7 @@ The side panel can search Amazon India, Amazon US, Flipkart, or Nykaa for you. C
 - Profile creation remains file-upload-only; guided camera capture is not implemented.
 - Required profile and retailer product images are sent to Perfect Corp for live processing. Perfect Corp may retain uploaded and generated assets for up to 30 days.
 - A completed live preview can be saved with **Use as active outfit**. Yourdrobe downloads and stores one rendered image browser-locally; it does not store the provider result URL.
-- Later live clothing previews use the active outfit as their source. Products in one batch are alternatives, not an automatic composition chain: save one result, then start a later preview to compose it.
+- Later live clothing previews use the active outfit as their source. Select one product card at a time, save its result, then select the next product to compose it.
 - The active outfit is shown as a large preview. New product and generated preview choices use a horizontal scrolling gallery.
 - Clothes V3 cannot render bags, belts, or jewelry. When an active clothing outfit exists, these products can be selected with **Add to outfit without preview** and are included in finalization without pretending that an AI preview was generated.
 - **Finalize outfit and open carts** opens each selected retailer product page, uses its visible Add to Cart or Add to Bag control, and opens the matching retailer cart. Products that require a size, colour, sign-in, CAPTCHA, or another choice stay open for manual completion and are not reported as added.
@@ -90,7 +90,7 @@ This is a manual check only. It consumes provider units and is never run automat
 2. Build or reload the unpacked extension.
 3. Open a supported top listing, upload the five required profile photos, and accept cloud processing when prompted.
 4. Confirm the result is labelled `YouCam AI preview`, then select **Use as active outfit**.
-5. Search for a bottom such as baggy jeans in the side panel and confirm **Add these products to active outfit** appears and its live preview runs from the saved active outfit.
+5. Search for a bottom such as baggy jeans in the side panel and confirm **Try this bottom** appears under each result and generates only the selected product's preview from the saved active outfit.
 6. Search for an accessory, select **Add to outfit without preview**, and confirm it appears in the selected-product list without a failed preview.
 7. Select **Finalize outfit and open carts**. Confirm directly addable products appear in the retailer cart and any product needing a size or other choice remains open for completion.
 8. Select **Reset to original profile photo** and confirm the active outfit and selected-product list are removed.
