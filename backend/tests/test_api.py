@@ -248,7 +248,9 @@ class ApiJourneyTest(unittest.TestCase):
     def test_live_batch_rejects_invalid_active_outfit_data(self) -> None:
         main.youcam = FakeYouCam()
         product_id = self.create_product("unused", "dress")
-        for value in ("data:text/plain;base64,b3V0Zml0", "x" * 14_000_001):
+        oversized = "data:image/jpeg;base64,".ljust(14_000_001, "x")
+        self.assertEqual(len(oversized), 14_000_001)
+        for value in ("data:text/plain;base64,b3V0Zml0", oversized):
             body = self.live_batch(product_id)
             body["outfit_base_image_data_url"] = value
             with self.subTest(value=value[:30]):
