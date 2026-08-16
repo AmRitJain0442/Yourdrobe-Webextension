@@ -240,6 +240,10 @@ export function App() {
     }
   }
 
+  function openProfileManager() {
+    if (!outfitMutation.current) setPhase("profile-manager");
+  }
+
   return <main>
     <header><span className="eyebrow">Yourdrobe</span><h1>Your fitting room, anywhere.</h1></header>
     {phase === "loading" && <p role="status">Reading products from this page...</p>}
@@ -255,7 +259,7 @@ export function App() {
         {(!product.product_type || product.product_type === "unknown") && <label>Choose product type for {product.title}<select required value={product.product_type ?? "unknown"} onChange={(event) => setProducts((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, product_type: event.target.value as ProductType } : item))}><option value="unknown">Choose product type</option>{selectableProductTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
       </div>)}</div>
       <button disabled={products.some((product) => !product.product_type || product.product_type === "unknown")} onClick={() => void runDemo()}>Try these products</button>
-      <button className="secondary" onClick={() => setPhase("profile-manager")}>Manage profile</button>
+      <button className="secondary" disabled={outfitBusy} onClick={openProfileManager}>Manage profile</button>
     </section>}
     {phase === "running" && <p role="status">Creating your previews...</p>}
     {phase === "empty" && <section><h2>No products found on this page.</h2><p>Browse a product listing or search results on this supported site, then retry.</p><button onClick={() => location.reload()}>Retry</button></section>}
@@ -272,7 +276,7 @@ export function App() {
           <a className="button secondary" href={product.product_url} target="_blank" rel="noreferrer">View original product</a>
         </article>;
       })}</div>
-      <button className="secondary" onClick={() => setPhase("profile-manager")}>Manage profile</button>
+      <button className="secondary" disabled={outfitBusy} onClick={openProfileManager}>Manage profile</button>
     </section>}
     {phase === "error" && <section><p className="error" role="alert">{error}</p><button onClick={() => location.reload()}>Retry</button></section>}
   </main>;

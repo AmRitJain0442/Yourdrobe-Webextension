@@ -430,6 +430,43 @@ describe("App", () => {
     await act(async () => { finishSave(activeDress); await Promise.resolve(); });
   });
 
+  it("blocks profile management while an active-outfit download is pending", async () => {
+    let finishDownload!: (response: Response) => void;
+    mockCompletedJob();
+    fetchMock.mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/tryons/job/result-image")) {
+        return new Promise((resolve) => { finishDownload = resolve; });
+      }
+      const body = url.endsWith("/capabilities") ? capabilities
+        : url.endsWith("/sessions") ? { session_id: "session" }
+          : url.endsWith("/profiles") ? { profile_id: "profile" }
+            : url.endsWith("/products/normalize") ? { products: [{ ...product, product_type: "dress", id: "product" }] }
+              : { jobs: [batchJob] };
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    await completeRun();
+    const saveButton = [...host.querySelectorAll("button")].find((item) => item.textContent === "Use as active outfit") as HTMLButtonElement;
+    const manageButton = [...host.querySelectorAll("button")].find((item) => item.textContent === "Manage profile") as HTMLButtonElement;
+
+    await act(async () => {
+      saveButton.click();
+      manageButton.click();
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).not.toContain("Manage your profile");
+    expect(([...host.querySelectorAll("button")].find((item) => item.textContent === "Manage profile") as HTMLButtonElement).disabled).toBe(true);
+    expect(saveActiveOutfit).not.toHaveBeenCalled();
+
+    await act(async () => {
+      finishDownload(new Response("render", { status: 200, headers: { "Content-Type": "image/jpeg" } }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(saveActiveOutfit).toHaveBeenCalledOnce();
+  });
+
   it("keeps active-outfit reset single-flight and disabled while busy", async () => {
     let finishReset!: () => void;
     vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
