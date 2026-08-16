@@ -55,6 +55,8 @@ $env:YOUCAM_API_KEYS='first-api-key,second-api-key'
 6. Click the extension action, upload the five required profile photos, and complete local profile consent.
 7. Run the mock or live flow for a supported listing as described below. Product links continue to open their source listing.
 
+The side panel can search Amazon India, Amazon US, Flipkart, or Nykaa for you. Choose a store, enter a product query, and Yourdrobe navigates the current tab to that store's search page before showing up to five retailer-ranked results in the panel. When an active outfit is saved and the new results include clothing, the action changes to **Add these products to active outfit**.
+
 ## Live YouCam clothing previews and privacy
 
 - Live YouCam supports clothing only: top, outerwear, bottom, and dress.
@@ -85,7 +87,7 @@ This is a manual check only. It consumes provider units and is never run automat
 2. Build or reload the unpacked extension.
 3. Open a supported top listing, upload the five required profile photos, and accept cloud processing when prompted.
 4. Confirm the result is labelled `YouCam AI preview`, then select **Use as active outfit**.
-5. Open a supported bottom listing and confirm its live preview runs from the saved active outfit.
+5. Search for a bottom such as baggy jeans in the side panel and confirm **Add these products to active outfit** appears and its live preview runs from the saved active outfit.
 6. Select **Reset to original profile photo** and confirm the active outfit is removed.
 
 ## Automated verification
@@ -102,4 +104,4 @@ git diff --check e19aa3e..HEAD
 git status --short --branch
 ```
 
-Expected: both backend modules pass, all extension tests pass, the production build succeeds, both diff checks print nothing, and only the intended documentation change is present before commit.
+Expected: both backend modules pass, all extension tests pass, the production build succeeds, both diff checks print nothing, and only intended changes are present before commit.
