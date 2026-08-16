@@ -405,9 +405,15 @@ backend/.venv/Scripts/python.exe -m pip install -r backend/requirements.txt
 In a second terminal, install dependencies and build the unpacked extension:
 
 ```powershell
-npm.cmd --prefix extension install
-npm.cmd --prefix extension run build
+Set-Location extension
+npm.cmd install
+npm.cmd run build
+Set-Location ..
 ```
+
+Run `npm install` from inside `extension/`. Unlike `run` and `test`, npm's `install` reads
+`package.json` from the current directory rather than from `--prefix`, so
+`npm --prefix extension install` fails at the repository root.
 
 The build runs `tsc --noEmit` before Vite, so a type error fails the build rather than shipping.
 
@@ -565,3 +571,141 @@ job, so one product failing never takes down a batch.
 | `provider_safety_rejection` | Job | YouCam rejected the request on safety grounds |
 | `provider_processing_failed` | Job | YouCam could not complete the render |
 | `unsupported_live_category` | Job | The product type has no YouCam path |
+
+---
+
+## Support matrix
+
+### Retailers
+
+| Retailer | Domain | Product extraction | Add to cart control |
+| --- | --- | --- | --- |
+| Amazon India | `amazon.in` | Search and category results | `#add-to-cart-button` |
+| Amazon US | `amazon.com` | Search and category results | `#add-to-cart-button` |
+| Flipkart | `flipkart.com` | Search results | Add to cart button |
+| Nykaa | `nykaa.com` | Search results | Add to bag button |
+
+### Product types
+
+| Product type | Recognized from title | YouCam live preview | Route |
+| --- | --- | --- | --- |
+| `top` | Yes | Yes | Clothes V3, `upper_body` |
+| `outerwear` | Yes | Yes | Clothes V3, `upper_body` |
+| `dress` | Yes | Yes | Clothes V3, `full_body` |
+| `bottom` | Yes | Yes | Clothes V3, `lower_body` |
+| `footwear` | Yes | Yes | Shoes API |
+| `headwear` | Yes | Yes | Hat API |
+| `eyewear` | Yes | No | See [known limitations](#known-limitations) |
+| `makeup`, `earrings`, `necklace`, `belt`, `bag`, `watch`, `bracelet`, `ring` | Yes | No | Selectable, but no live preview route |
+
+A title that matches no rule, or matches two rules at once, is reported as `unknown` and the
+shopper is asked to choose the type before anything is sent.
+
+---
+
+## Privacy and data handling
+
+Yourdrobe is built so that the smallest possible amount of data leaves your machine.
+
+**Stored on your device only.** Profile photos, compiled outfits, and profile metadata live in
+IndexedDB and `chrome.storage.local` in this Chrome profile. They are never uploaded to any
+server operated by this project, because this project operates no server.
+
+**Consent is layered and separate.** Local profile storage, profile generation, and cloud try-on
+are three distinct consents. Granting one does not grant another, and the first live try-on
+prompts separately even after a profile exists.
+
+**What is sent, and where.**
+
+| Data | Sent to | When |
+| --- | --- | --- |
+| Your source photo | Profile generation service | Only after explicit consent, at profile creation |
+| Your profile photo or active outfit | Perfect Corp YouCam | Each live preview request |
+| The retailer's product image URL | Perfect Corp YouCam | Each live preview request, as `ref_file_url` |
+
+**Retention.** The backend does not persist your photos. Perfect Corp may retain uploaded and
+generated assets for up to 30 days, per their
+[file retention period](https://docs.perfectcorp.com/develop/file_retention_period).
+
+**No measurements.** Yourdrobe never asks for body measurements or clothing sizes.
+
+**Deletion.** **Reset to original profile photo** clears the active outfit, the selected
+products, and the compiled history. Deleting the profile removes everything, including the
+active outfit.
+
+---
+
+## Testing
+
+No test touches a network provider. Run from the repository root:
+
+```powershell
+$env:PYTHONPATH='backend'
+backend\.venv\Scripts\python.exe -m unittest backend.tests.test_youcam backend.tests.test_profile_generation backend.tests.test_api -v
+npm.cmd --prefix extension test
+npm.cmd --prefix extension run build
+```
+
+| Suite | Covers |
+| --- | --- |
+| `backend/tests/test_youcam.py` | Key rotation, the upload handshake, error classification, result host allowlisting |
+| `backend/tests/test_api.py` | Endpoint contracts, host validation, consent gating, job lifecycle |
+| `backend/tests/test_profile_generation.py` | Source decoding, output validation, failure mapping |
+| `extension/src/profile/store.test.ts` | Local persistence, rollback, outfit versioning |
+| `extension/src/sidepanel/App.test.tsx` | Side panel phases, polling, composition, finalize |
+| `extension/src/content/adapters/adapters.test.ts` | Retailer card extraction |
+
+There is also a manual real-key smoke test. It consumes provider units, so it is never run
+automatically. See [`docs/superpowers/plans`](docs/superpowers/plans) for the recorded procedure.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `The local backend is unavailable` | Backend not running | Start Uvicorn on port 8001 |
+| Results labelled `Mock AI preview` | No YouCam key configured | Set `YOUCAM_API_KEYS` and restart the backend |
+| `youcam_keys_exhausted` | No key could start the task | Verify the keys are valid and active |
+| `youcam_rate_limited` | Every key answered `429` | Wait, or add another key to the list |
+| Profile setup returns `503` | Profile generation not configured | Set the profile generation variables, then restart |
+| `This shopping site is not supported` | Host has no adapter | Open a supported retailer listing |
+| No products found on this page | Not a search or category listing | Open search results rather than a single product page |
+| Try-on action stays disabled | Shoes or hats without a preview model | Choose Women or Men on that card |
+| `The preview is taking too long` | Passed the 80 second deadline | Retry. The provider may be under load |
+| Finalize stops on one product | Size, colour, sign in, or CAPTCHA required | Complete that product by hand, then finalize again |
+| Environment change has no effect | Backend caches configuration at startup | Restart the backend after changing any variable |
+
+---
+
+## Known limitations
+
+- **Eyewear is not integrated.** Perfect Corp delivers eyewear through a separate 3D web module
+  that requires digitized eyewear SKUs, so previewing sunglasses from a retailer image is not
+  possible through the APIs used here.
+- **Six product types have a live path.** Headwear, top, outerwear, dress, bottom, and footwear.
+  The other recognized types are selectable but have no preview route.
+- **Layering is not lossless.** Each preview is a fresh render, so a later YouCam call can alter
+  items placed by an earlier one. Composition is sequential raster editing, not a layer stack.
+- **Profile creation is upload only.** Guided camera capture is not implemented.
+- **Backend state is in memory.** Sessions, profiles, products, and jobs are per process and
+  capped at 100 each. This is a demo service, not a multi-user one.
+- **Provider result URLs expire.** Unsaved previews last only for the current side panel
+  session. Save a preview to keep it.
+- **Fifty saved outfits.** Past that, reset the history before saving another.
+
+---
+
+## Acknowledgements
+
+Built on the Perfect Corp YouCam API:
+[Clothes V3](https://docs.perfectcorp.com/reference/ai_clothes/section/overview),
+[Shoes](https://docs.perfectcorp.com/reference/ai_shoes),
+[Hat](https://docs.perfectcorp.com/reference/ai_hat).
+
+<div align="center">
+<br>
+<img src="docs/assets/mark.svg" alt="" width="44">
+<br><br>
+<sub><b>Yourdrobe</b><br>Your fitting room, anywhere.</sub>
+</div>
