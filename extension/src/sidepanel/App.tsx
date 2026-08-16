@@ -24,6 +24,11 @@ const selectableProductTypes: ProductType[] = [
   "makeup", "eyewear", "headwear", "earrings", "necklace", "top", "outerwear",
   "dress", "bottom", "belt", "bag", "watch", "bracelet", "ring", "footwear",
 ];
+const activeOutfitProductTypes = new Set<ProductType>(["top", "outerwear", "bottom", "dress"]);
+const requiresOriginalFullBody = (products: Product[]) => products.some((product) =>
+  !activeOutfitProductTypes.has(product.product_type ?? "unknown")
+  && requirementsForProducts([product]).includes("full_body_front"),
+);
 
 export function App() {
   const [phase, setPhase] = useState<Phase>("loading");
@@ -88,8 +93,12 @@ export function App() {
 
   async function runDemo(currentProfile = profile) {
     const selectedProducts = products.slice(0, 5);
+    const outfitBaseImageDataUrl = activeOutfit && selectedProducts.some((product) => activeOutfitProductTypes.has(product.product_type ?? "unknown"))
+      ? activeOutfit.image_data_url
+      : undefined;
+    const activeOutfitReplacesFullBody = Boolean(outfitBaseImageDataUrl) && !requiresOriginalFullBody(selectedProducts);
     const availableRoles = Object.keys(currentProfile?.assets ?? {}) as PhotoRole[];
-    if (activeOutfit) availableRoles.push("full_body_front");
+    if (activeOutfitReplacesFullBody) availableRoles.push("full_body_front");
     const required = missingRequirements(selectedProducts, availableRoles);
     if (required.length) {
       setMissing(required);
@@ -115,12 +124,12 @@ export function App() {
       }
       const available = new Set(Object.keys(currentProfile?.assets ?? {}) as PhotoRole[]);
       const roles = requirementsForProducts(selectedProducts)
-        .filter((requirement) => requirement !== "full_body_front" || !activeOutfit)
+        .filter((requirement) => requirement !== "full_body_front" || !activeOutfitReplacesFullBody)
         .map((requirement) =>
         rolesForRequirement(requirement).find((role) => available.has(role)) ?? rolesForRequirement(requirement)[0],
       );
       const assets = await loadRequiredAssets(roles);
-      const started = await startDemo(assets, currentProfile?.attributes ?? {}, selectedProducts, Boolean(currentProfile?.youcam_consented_at), activeOutfit?.image_data_url, request.signal);
+      const started = await startDemo(assets, currentProfile?.attributes ?? {}, selectedProducts, Boolean(currentProfile?.youcam_consented_at), outfitBaseImageDataUrl, request.signal);
       if (request.signal.aborted) return;
       pollDeadline = new AbortController();
       pollDeadlineTimer = setTimeout(
@@ -161,7 +170,7 @@ export function App() {
         const repaired = await loadProfile();
         setProfile(repaired);
         const repairedRoles = Object.keys(repaired?.assets ?? {}) as PhotoRole[];
-        if (activeOutfit) repairedRoles.push("full_body_front");
+        if (activeOutfitReplacesFullBody) repairedRoles.push("full_body_front");
         setMissing(missingRequirements(selectedProducts, repairedRoles));
         setPhase("profile-setup");
         return;

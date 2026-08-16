@@ -360,6 +360,44 @@ describe("App", () => {
     expect(requestBody("/products/normalize").products).toHaveLength(2);
   });
 
+  it("keeps the original full-body asset for a bag when an active outfit exists", async () => {
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "bag" }] });
+
+    await renderApp();
+    expect(host.querySelector("article.active-outfit")?.textContent).toContain("Saved linen top");
+    await click("Try these products");
+
+    expect(loadRequiredAssets).toHaveBeenCalledWith(["full_body_front"]);
+    expect(requestBody("/tryons/batch").assets).toEqual([
+      { kind: "full_body_front", image_data_url: "data:image/png;base64,profile" },
+    ]);
+    expect(requestBody("/tryons/batch")).not.toHaveProperty("outfit_base_image_data_url");
+  });
+
+  it("uses the active base for a top while retaining the original full-body asset for a bag", async () => {
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      products: [{ ...product, product_type: "top" }, { ...product, title: "Canvas bag", product_url: "https://amazon.in/dp/BAG", product_type: "bag" }],
+    });
+
+    await renderApp();
+    expect(host.querySelector("article.active-outfit")?.textContent).toContain("Saved linen top");
+    await click("Try these products");
+
+    const batch = requestBody("/tryons/batch");
+    expect(loadRequiredAssets).toHaveBeenCalledWith(["full_body_front"]);
+    expect(batch.assets).toEqual([
+      { kind: "full_body_front", image_data_url: "data:image/png;base64,profile" },
+    ]);
+    expect(batch.outfit_base_image_data_url).toBe("data:image/jpeg;base64,active");
+  });
+
   it.each([
     ["mock", { status: "completed", mock: true, result_url: "https://example.com/mock.jpg" }],
     ["failed", { status: "failed", mock: false, result_url: "https://provider.example/result.jpg" }],
