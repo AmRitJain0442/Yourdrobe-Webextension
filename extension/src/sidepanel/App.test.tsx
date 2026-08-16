@@ -326,8 +326,8 @@ describe("App", () => {
     await renderApp();
     await click("Try these products");
 
-    expect(host.textContent).toContain("4 of 5 required photos still needed");
-    expect(host.textContent).toContain("Front face photo");
+    expect(host.textContent).toContain("Create your profile from one photo");
+    expect(host.querySelectorAll('input[type="file"]')).toHaveLength(1);
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/sessions"))).toBe(false);
   });
 
@@ -339,7 +339,7 @@ describe("App", () => {
     await renderApp();
     await act(async () => { (host.querySelector("button") as HTMLButtonElement).click(); });
 
-    expect(host.textContent).toContain("Front full-body photo");
+    expect(host.textContent).toContain("Full-body source photo");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -814,7 +814,7 @@ describe("App", () => {
     });
     await act(async () => { (host.querySelector("button") as HTMLButtonElement).click(); });
 
-    expect(host.textContent).toContain("Front full-body photo");
+    expect(host.textContent).toContain("Full-body source photo");
   });
 
   it("reopens setup when the backend reports missing profile roles", async () => {
@@ -840,7 +840,7 @@ describe("App", () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain("Front full-body photo");
+    expect(host.textContent).toContain("Full-body source photo");
   });
 
   it("reopens setup after repairing metadata for a missing local blob", async () => {
@@ -855,7 +855,7 @@ describe("App", () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain("Front full-body photo");
+    expect(host.textContent).toContain("Full-body source photo");
   });
 
   it("shows a helpful empty state when a supported page has no products", async () => {

@@ -3,109 +3,122 @@ import { prepareProfileImage } from "../profile/image";
 import { profilePhotoRoles, type ProfilePhotoRole } from "../profile/requirements";
 import { saveAsset } from "../profile/store";
 import type { PhotoRole, PreparedProfileImage } from "../profile/types";
+import { generateProfileAssets } from "./api";
 
-const guidance: Record<ProfilePhotoRole, { label: string; help: string }> = {
-  face_front: { label: "Front face photo", help: "Use an evenly lit, unobstructed front-facing photo." },
-  face_left: { label: "Left face photo", help: "Turn your face to the left in even lighting." },
-  face_right: { label: "Right face photo", help: "Turn your face to the right in even lighting." },
-  full_body_front: { label: "Front full-body photo", help: "Include your full body from head to feet." },
-  full_body_side: { label: "Side full-body photo", help: "Include your full body from head to feet from the side." },
+const labels: Record<ProfilePhotoRole, string> = {
+  face_front: "Front face photo",
+  face_left: "Left face photo",
+  face_right: "Right face photo",
+  full_body_front: "Front full-body photo",
+  full_body_side: "Side full-body photo",
 };
 
+type Generated = { image: PreparedProfileImage; dataUrl: string };
 type Props = { existingRoles?: PhotoRole[]; onSaved: () => void; onCancel: () => void };
 
-export function ProfileSetup({ existingRoles = [], onSaved, onCancel }: Props) {
-  const requiredRoles = profilePhotoRoles.filter((role) => !existingRoles.includes(role));
-  const [files, setFiles] = useState<Partial<Record<ProfilePhotoRole, File>>>({});
-  const [errors, setErrors] = useState<Partial<Record<ProfilePhotoRole, string>>>({});
+function blobDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("We could not read that photo."));
+    reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("We could not read that photo."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function dataUrlFile(dataUrl: string, role: ProfilePhotoRole): File {
+  const match = /^data:(image\/(?:jpeg|png));base64,([A-Za-z0-9+/]+={0,2})$/.exec(dataUrl);
+  if (!match) throw new Error("The generated profile contained an invalid image.");
+  const binary = atob(match[2]);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return new File([bytes], `${role}.${match[1] === "image/png" ? "png" : "jpg"}`, { type: match[1] });
+}
+
+export function ProfileSetup({ onSaved, onCancel }: Props) {
+  const [file, setFile] = useState<File>();
+  const [generated, setGenerated] = useState<Generated[]>([]);
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const saving = useRef(false);
+  const running = useRef(false);
   const cancelled = useRef(false);
+  const request = useRef<AbortController | undefined>(undefined);
 
-  useEffect(() => () => { cancelled.current = true; }, []);
+  useEffect(() => () => {
+    cancelled.current = true;
+    request.current?.abort();
+  }, []);
 
-  function setFile(role: ProfilePhotoRole, file?: File) {
-    setFiles((current) => ({ ...current, [role]: file }));
-    setErrors((current) => {
-      if (!current[role]) return current;
-      const next = { ...current };
-      delete next[role];
-      return next;
-    });
-  }
-
-  async function save(event: React.FormEvent<HTMLFormElement>) {
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving.current) return;
-    saving.current = true;
-    cancelled.current = false;
+    if (running.current) return;
+    if (!consent) { setError("Agree to send the source photo to Google Vertex AI and save the generated profile locally."); return; }
+    if (!file) { setError("Choose one full-body photo before generating your profile."); return; }
+    running.current = true;
     setBusy(true);
-    let saved = false;
+    setError("");
     try {
-      if (!consent) { setError("Agree to browser-local storage and per-run transmission before saving."); return; }
-      const chosen: { role: ProfilePhotoRole; file: File }[] = [];
-      const missing: Partial<Record<ProfilePhotoRole, string>> = {};
-      for (const role of requiredRoles) {
-        const file = files[role];
-        if (!file) missing[role] = "Choose a photo before saving.";
-        else chosen.push({ role, file });
-      }
-      if (Object.keys(missing).length) { setErrors(missing); return; }
-      setError("");
-      const prepared = await Promise.allSettled(chosen.map(({ file, role }) => prepareProfileImage(file, role)));
-      const invalid: Partial<Record<ProfilePhotoRole, string>> = {};
-      prepared.forEach((result, index) => {
-        if (result.status === "rejected") invalid[chosen[index].role] = result.reason instanceof Error ? result.reason.message : "We could not process that photo.";
-      });
-      if (Object.keys(invalid).length) { setErrors(invalid); return; }
-      if (cancelled.current) return;
-      try {
-        for (const result of prepared) {
+      if (generated.length) {
+        for (const item of generated) {
           if (cancelled.current) return;
-          await saveAsset((result as PromiseFulfilledResult<PreparedProfileImage>).value);
+          await saveAsset(item.image);
         }
-        if (cancelled.current) return;
-        saved = !cancelled.current;
-      } catch (reason) {
-        setError(reason instanceof Error ? reason.message : "We could not save your profile photos.");
+        if (!cancelled.current) onSaved();
+        return;
+      }
+      const source = await prepareProfileImage(file, "full_body_front");
+      request.current = new AbortController();
+      const assets = await generateProfileAssets(await blobDataUrl(source.blob), request.current.signal);
+      const prepared = await Promise.all(profilePhotoRoles.map(async (role) => {
+        const asset = assets.find((candidate) => candidate.kind === role)!;
+        return { image: await prepareProfileImage(dataUrlFile(asset.image_data_url, role), role), dataUrl: asset.image_data_url };
+      }));
+      if (!cancelled.current) setGenerated(prepared);
+    } catch (reason) {
+      if (!cancelled.current && !(reason instanceof DOMException && reason.name === "AbortError")) {
+        setError(reason instanceof Error ? reason.message : "We could not generate your profile photos.");
       }
     } finally {
-      saving.current = false;
-      setBusy(false);
+      request.current = undefined;
+      running.current = false;
+      if (!cancelled.current) setBusy(false);
     }
-    if (saved) onSaved();
+  }
+
+  function choose(next?: File) {
+    setFile(next);
+    setGenerated([]);
+    setError("");
   }
 
   function cancel() {
-    if (cancelled.current) return;
     cancelled.current = true;
+    request.current?.abort();
     onCancel();
   }
 
   return <section>
-    <h2>Set up your local profile</h2>
-    <p className="profile-progress">{requiredRoles.length} of {profilePhotoRoles.length} required photos still needed.</p>
-    <form aria-busy={busy} onSubmit={(event) => void save(event)}>
+    <h2>Create your profile from one photo</h2>
+    <p><strong>One full-body photo</strong> generates a five-photo, white-background profile set with Nano Banana.</p>
+    <p>Use a sharp, well-lit, head-to-toe photo where your face, clothing, hands, and feet are visible. AI-generated angles can be inaccurate, so review every image before saving.</p>
+    <form aria-busy={busy} onSubmit={(event) => void submit(event)}>
       <fieldset className="profile-fields-group" disabled={busy}>
-        <div className="profile-fields">
-          {requiredRoles.map((role) => {
-            const inputId = `${role}-photo`;
-            const guidanceId = `${role}-guidance`;
-            const errorId = `${role}-error`;
-            return <div className="profile-field" key={role}>
-              <label htmlFor={inputId}>{guidance[role].label}</label>
-              <p className="profile-guidance" id={guidanceId}>{guidance[role].help}</p>
-              <input id={inputId} type="file" accept="image/jpeg,image/png,image/webp" aria-describedby={`${guidanceId}${errors[role] ? ` ${errorId}` : ""}`} aria-invalid={errors[role] ? true : undefined} onChange={(event) => setFile(role, event.target.files?.[0])} />
-              {errors[role] && <p className="error" id={errorId} role="alert">{errors[role]}</p>}
-            </div>;
-          })}
-        </div>
+        <label htmlFor="profile-source">Full-body source photo</label>
+        <input id="profile-source" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => choose(event.target.files?.[0])} />
       </fieldset>
-      <label className="check"><input type="checkbox" disabled={busy} checked={consent} onChange={(event) => setConsent(event.target.checked)} />I agree to browser-local profile storage and per-run transmission of required photos to 127.0.0.1:8001.</label>
+      <label className="check"><input type="checkbox" disabled={busy} checked={consent} onChange={(event) => setConsent(event.target.checked)} />I agree to send this photo to Google Vertex AI for Nano Banana generation, store the five AI-generated photos browser-locally, and send required photos to the selected try-on provider when I request a preview.</label>
+      {generated.length > 0 && <div className="generated-profile" aria-label="Generated profile preview">
+        <h3>Review your AI-generated profile</h3>
+        <div className="generated-profile-grid">{generated.map(({ image, dataUrl }) => <figure key={image.metadata.role}>
+          <img src={dataUrl} alt={`AI-generated ${labels[image.metadata.role as ProfilePhotoRole]}`} />
+          <figcaption>{labels[image.metadata.role as ProfilePhotoRole]}</figcaption>
+        </figure>)}</div>
+      </div>}
       {error && <p className="error" role="alert">{error}</p>}
-      <div className="profile-actions"><button type="submit" disabled={busy}>Save profile photos</button><button type="button" className="secondary" onClick={cancel}>Cancel</button></div>
+      <div className="profile-actions">
+        <button type="submit" disabled={busy}>{generated.length ? "Save generated profile" : "Generate profile photos"}</button>
+        {generated.length > 0 && <button type="button" className="secondary" disabled={busy} onClick={() => setGenerated([])}>Generate again</button>}
+        <button type="button" className="secondary" disabled={busy} onClick={cancel}>Cancel</button>
+      </div>
     </form>
   </section>;
 }

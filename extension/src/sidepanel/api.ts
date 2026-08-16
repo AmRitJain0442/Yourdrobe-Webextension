@@ -1,9 +1,11 @@
 import type { Product, ProductType, TryOnJob } from "../types";
 import type { ProfileAssetUpload, ProfileAttributes, RequirementKey } from "../profile/types";
+import { profilePhotoRoles } from "../profile/requirements";
 
 const baseUrl = "http://127.0.0.1:8001/v1";
 const requestTimeoutMs = 10_000;
 const batchTimeoutMs = 300_000;
+const profileGenerationTimeoutMs = 300_000;
 const maxResultImageBytes = 10 * 1024 * 1024;
 const acceptedResultImageTypes = new Set(["image/jpeg", "image/png"]);
 export type NormalizedProduct = Product & { id: string };
@@ -61,6 +63,29 @@ async function json<T>(path: string, init?: RequestInit, timeoutMs = requestTime
 
 export const getCapabilities = (signal?: AbortSignal) =>
   json<Capabilities>("/capabilities", { signal });
+
+export async function generateProfileAssets(imageDataUrl: string, signal?: AbortSignal): Promise<ProfileAssetUpload[]> {
+  const result = await json<{ assets?: unknown }>("/profiles/generate-assets", {
+    method: "POST",
+    signal,
+    body: JSON.stringify({ image_data_url: imageDataUrl, cloud_consent: true }),
+  }, profileGenerationTimeoutMs);
+  if (!Array.isArray(result.assets) || result.assets.length !== profilePhotoRoles.length) {
+    throw new Error("The local backend returned an incomplete generated profile.");
+  }
+  const assets = result.assets.filter((asset): asset is ProfileAssetUpload => {
+    if (!asset || typeof asset !== "object") return false;
+    const value = asset as Record<string, unknown>;
+    return profilePhotoRoles.includes(value.kind as typeof profilePhotoRoles[number])
+      && typeof value.image_data_url === "string"
+      && value.image_data_url.startsWith("data:image/");
+  });
+  if (assets.length !== profilePhotoRoles.length
+    || new Set(assets.map((asset) => asset.kind)).size !== profilePhotoRoles.length) {
+    throw new Error("The local backend returned an incomplete generated profile.");
+  }
+  return profilePhotoRoles.map((role) => assets.find((asset) => asset.kind === role)!);
+}
 
 export async function getResultImage(jobId: string, signal?: AbortSignal): Promise<Blob> {
   const requestSignal = signal

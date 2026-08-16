@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProfileAssetUpload } from "../profile/types";
 import type { Product } from "../types";
-import { startDemo } from "./api";
+import { generateProfileAssets, startDemo } from "./api";
 
 const asset: ProfileAssetUpload = {
   kind: "full_body_front",
@@ -45,5 +45,31 @@ describe("startDemo", () => {
       cloud_consent: true,
       outfit_base_image_data_url: "data:image/jpeg;base64,active",
     });
+  });
+});
+
+describe("generateProfileAssets", () => {
+  it("sends cloud consent and returns all five roles in profile order", async () => {
+    const roles = ["full_body_side", "face_right", "full_body_front", "face_left", "face_front"] as const;
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      assets: roles.map((kind) => ({ kind, image_data_url: `data:image/jpeg;base64,${kind}` })),
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateProfileAssets("data:image/jpeg;base64,source");
+
+    expect(result.map((asset) => asset.kind)).toEqual(["face_front", "face_left", "face_right", "full_body_front", "full_body_side"]);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toEqual({
+      image_data_url: "data:image/jpeg;base64,source",
+      cloud_consent: true,
+    });
+  });
+
+  it("rejects duplicate or incomplete provider output", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      assets: Array.from({ length: 5 }, () => ({ kind: "face_front", image_data_url: "data:image/jpeg;base64,image" })),
+    }), { status: 200 })));
+
+    await expect(generateProfileAssets("data:image/jpeg;base64,source")).rejects.toThrow("incomplete generated profile");
   });
 });

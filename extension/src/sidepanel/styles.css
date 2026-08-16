@@ -63,6 +63,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .profile-field { display: grid; gap: 4px; }
 .profile-guidance { margin: 0; }
 .profile-actions { display: grid; gap: 8px; }
+.generated-profile { margin: 18px 0; }
+.generated-profile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.generated-profile figure { margin: 0; }
+.generated-profile img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border: 1px solid var(--border); border-radius: var(--radius); background: #fff; }
+.generated-profile figcaption { margin-top: 4px; color: var(--text-muted); font-size: 12px; font-weight: 700; }
 .profile-progress { margin-top: 0; }
 .profile-heading, .profile-completion p { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .profile-heading .secondary { width: auto; min-height: 36px; padding: 8px 12px; }
