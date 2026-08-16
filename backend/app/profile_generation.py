@@ -68,7 +68,7 @@ class NanoBananaClient:
     def generate(self, source_data_url: str) -> list[dict[str, str]]:
         mime_type, source = self._decode_source(source_data_url)
         if not self._client_factory:
-            raise ProfileGenerationFailure("Nano Banana profile generation is not configured.")
+            raise ProfileGenerationFailure("AI profile generation is not configured.")
         try:
             from google.genai import types
 
@@ -96,15 +96,15 @@ class NanoBananaClient:
             status = getattr(error, "status_code", None) or getattr(error, "code", None)
             messages = {
                 400: "Google could not use that source photo. Try a clear, well-lit full-body photo.",
-                401: "Nano Banana authentication failed. Restart the backend after checking its Google credential.",
-                403: "The Google account cannot use Nano Banana in the configured project.",
-                404: "The configured Nano Banana model is unavailable in this project.",
-                429: "Nano Banana quota is temporarily exhausted. Try again shortly.",
+                401: "AI profile authentication failed. Restart the backend after checking its Google credential.",
+                403: "The Google account cannot generate profile images in the configured project.",
+                404: "AI profile generation is unavailable in the configured project.",
+                429: "AI profile generation quota is temporarily exhausted. Try again shortly.",
             }
             message = messages.get(status)
             if not message and isinstance(status, int) and status >= 500:
-                message = "Nano Banana is temporarily unavailable. Try again shortly."
-            raise ProfileGenerationFailure(message or "Nano Banana could not generate the profile photos.") from error
+                message = "AI profile generation is temporarily unavailable. Try again shortly."
+            raise ProfileGenerationFailure(message or "AI profile generation could not create the profile photos.") from error
 
     @staticmethod
     def _decode_source(value: str) -> tuple[str, bytes]:
@@ -128,6 +128,6 @@ class NanoBananaClient:
                 if inline and inline.mime_type in ("image/jpeg", "image/png") and inline.data:
                     content = bytes(inline.data)
                     if len(content) >= MAX_IMAGE_BYTES:
-                        raise ProfileGenerationFailure("Nano Banana returned an image that was too large.")
+                        raise ProfileGenerationFailure("AI profile generation returned an image that was too large.")
                     return inline.mime_type, content
-        raise ProfileGenerationFailure("Nano Banana did not return a usable profile image.")
+        raise ProfileGenerationFailure("AI profile generation did not return a usable profile image.")

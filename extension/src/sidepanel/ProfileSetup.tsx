@@ -98,14 +98,14 @@ export function ProfileSetup({ onSaved, onCancel }: Props) {
 
   return <section>
     <h2>Create your profile from one photo</h2>
-    <p><strong>One full-body photo</strong> generates a five-photo, white-background profile set with Nano Banana.</p>
+    <p><strong>One full-body photo</strong> generates a five-photo, white-background profile set using AI.</p>
     <p>Use a sharp, well-lit, head-to-toe photo where your face, clothing, hands, and feet are visible. AI-generated angles can be inaccurate, so review every image before saving.</p>
     <form aria-busy={busy} onSubmit={(event) => void submit(event)}>
       <fieldset className="profile-fields-group" disabled={busy}>
         <label htmlFor="profile-source">Full-body source photo</label>
         <input id="profile-source" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => choose(event.target.files?.[0])} />
       </fieldset>
-      <label className="check"><input type="checkbox" disabled={busy} checked={consent} onChange={(event) => setConsent(event.target.checked)} />I agree to send this photo to Google Vertex AI for Nano Banana generation, store the five AI-generated photos browser-locally, and send required photos to the selected try-on provider when I request a preview.</label>
+      <label className="check"><input type="checkbox" disabled={busy} checked={consent} onChange={(event) => setConsent(event.target.checked)} />I agree to send this photo to Google Vertex AI to generate my profile photos, store the five AI-generated photos browser-locally, and send required photos to the selected try-on provider when I request a preview.</label>
       {generated.length > 0 && <div className="generated-profile" aria-label="Generated profile preview">
         <h3>Review your AI-generated profile</h3>
         <div className="generated-profile-grid">{generated.map(({ image, dataUrl }) => <figure key={image.metadata.role}>

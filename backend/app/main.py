@@ -182,7 +182,7 @@ def generate_profile_assets(body: GenerateProfileInput) -> dict[str, object]:
     if not body.cloud_consent:
         raise HTTPException(400, "Google cloud-processing consent is required")
     if not profile_generator.enabled:
-        raise HTTPException(503, "Nano Banana profile generation is not configured")
+        raise HTTPException(503, "AI profile generation is not configured")
     try:
         assets = profile_generator.generate(body.image_data_url)
     except ProfileGenerationFailure as failure:
