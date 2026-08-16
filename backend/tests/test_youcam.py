@@ -98,10 +98,27 @@ class YouCamClientTest(unittest.TestCase):
             "gender": "female", "style": "random",
         })
 
+    def test_uploads_source_and_creates_hat_task(self) -> None:
+        started = self.client.create_hat_task(
+            "data:image/jpeg;base64,cGhvdG8=", "https://images.example/cap.jpg", "female",
+        )
+        self.assertEqual(started, StartedTask(task_id="provider-task", key_index=0, task_kind="hat"))
+        self.assertEqual(self.requests[0][0:2], ("POST", "/s2s/v2.0/file/hat"))
+        self.assertEqual(self.requests[2][0:2], ("POST", "/s2s/v2.0/task/hat"))
+        self.assertEqual(self.requests[2][3], {
+            "src_file_id": "source-file", "ref_file_url": "https://images.example/cap.jpg",
+            "gender": "female", "style": "random",
+        })
+
     def test_polls_shoes_task_on_shoes_endpoint(self) -> None:
         self.responses = [httpx.Response(200, json={"data": {"task_status": "processing"}})]
         self.assertEqual(self.client.get_task("provider-task", 0, "shoes"), ProviderTaskState(status="processing"))
         self.assertEqual(self.requests[0][0:2], ("GET", "/s2s/v2.0/task/shoes/provider-task"))
+
+    def test_polls_hat_task_on_hat_endpoint(self) -> None:
+        self.responses = [httpx.Response(200, json={"data": {"task_status": "processing"}})]
+        self.assertEqual(self.client.get_task("provider-task", 0, "hat"), ProviderTaskState(status="processing"))
+        self.assertEqual(self.requests[0][0:2], ("GET", "/s2s/v2.0/task/hat/provider-task"))
 
     def test_maps_shoes_no_face_error_to_the_source_image(self) -> None:
         self.responses = [httpx.Response(200, json={

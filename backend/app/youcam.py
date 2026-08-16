@@ -14,12 +14,14 @@ CLOTH_FILE_PATH = "/s2s/v2.0/file/cloth-v3"
 CLOTH_TASK_PATH = "/s2s/v2.0/task/cloth-v3"
 SHOES_FILE_PATH = "/s2s/v2.0/file/shoes"
 SHOES_TASK_PATH = "/s2s/v2.0/task/shoes"
+HAT_FILE_PATH = "/s2s/v2.0/file/hat"
+HAT_TASK_PATH = "/s2s/v2.0/task/hat"
 RETRYABLE_HTTP = {401, 403, 429}
 PROVIDER_TIMEOUT_SECONDS = 5.0
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 GarmentCategory = Literal["upper_body", "lower_body", "full_body"]
-TaskKind = Literal["clothes", "shoes"]
+TaskKind = Literal["clothes", "shoes", "hat"]
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,14 @@ class YouCamClient:
             {"gender": gender, "style": "random"}, "shoes",
         )
 
+    def create_hat_task(self, source_data_url: str, reference_url: str, gender: str) -> StartedTask:
+        if gender not in ("female", "male"):
+            raise YouCamFailure("provider_processing_failed", "Choose a hat preview model.")
+        return self._create_task(
+            source_data_url, reference_url, HAT_FILE_PATH, HAT_TASK_PATH,
+            {"gender": gender, "style": "random"}, "hat",
+        )
+
     def _create_task(
         self,
         source_data_url: str,
@@ -144,7 +154,11 @@ class YouCamClient:
     def get_task(self, task_id: str, key_index: int, task_kind: TaskKind = "clothes") -> ProviderTaskState:
         if not 0 <= key_index < len(self._keys):
             return self._failed("provider_processing_failed")
-        task_path = CLOTH_TASK_PATH if task_kind == "clothes" else SHOES_TASK_PATH if task_kind == "shoes" else None
+        task_path = {
+            "clothes": CLOTH_TASK_PATH,
+            "shoes": SHOES_TASK_PATH,
+            "hat": HAT_TASK_PATH,
+        }.get(task_kind)
         if task_path is None:
             return self._failed("provider_processing_failed")
         try:

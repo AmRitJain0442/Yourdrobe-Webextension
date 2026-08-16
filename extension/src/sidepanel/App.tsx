@@ -360,7 +360,7 @@ export function App() {
 
   function previewProduct(product: Product) {
     let selected = product;
-    if (product.product_type === "footwear") {
+    if (product.product_type === "footwear" || product.product_type === "headwear") {
       const gender = shoeGenders[product.product_url];
       if (!gender) return;
       selected = { ...product, metadata: { ...product.metadata, gender } };
@@ -468,8 +468,8 @@ export function App() {
       <div className="section-heading"><div><span className="eyebrow">Shop this page</span><h2>{products.length} products ready</h2></div><span className="result-count">{productPage * productPageSize + 1}–{Math.min((productPage + 1) * productPageSize, products.length)}</span></div>
       <div className="list product-page">{visibleProducts.map((product, index) => <div className="catalog-item" key={product.product_url}><ProductRow product={product} />
         {(!product.product_type || product.product_type === "unknown") && <label>Choose product type for {product.title}<select required value={product.product_type ?? "unknown"} onChange={(event) => setProducts((current) => current.map((item, itemIndex) => itemIndex === productPage * productPageSize + index ? { ...item, product_type: event.target.value as ProductType } : item))}><option value="unknown">Choose product type</option>{selectableProductTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
-        {product.product_type === "footwear" && <label>Shoe preview model<select aria-label="Shoe preview model" value={shoeGenders[product.product_url] ?? ""} onChange={(event) => setShoeGenders((current) => ({ ...current, [product.product_url]: event.target.value as ShoeGender }))}><option value="">Choose Women or Men</option><option value="female">Women</option><option value="male">Men</option></select></label>}
-        {product.product_type && product.product_type !== "unknown" && activeOutfitProductTypes.has(product.product_type) && <button className="ai-button" disabled={outfitBusy || (product.product_type === "footwear" && !shoeGenders[product.product_url])} onClick={() => previewProduct(product)}>{product.product_type === "footwear" ? "Try these shoes" : `Try this ${product.product_type}`}</button>}
+        {(product.product_type === "footwear" || product.product_type === "headwear") && <label>{product.product_type === "footwear" ? "Shoe" : "Hat"} preview model<select aria-label={`${product.product_type === "footwear" ? "Shoe" : "Hat"} preview model`} value={shoeGenders[product.product_url] ?? ""} onChange={(event) => setShoeGenders((current) => ({ ...current, [product.product_url]: event.target.value as ShoeGender }))}><option value="">Choose Women or Men</option><option value="female">Women</option><option value="male">Men</option></select></label>}
+        {product.product_type && product.product_type !== "unknown" && activeOutfitProductTypes.has(product.product_type) && <button className="ai-button" disabled={outfitBusy || ((product.product_type === "footwear" || product.product_type === "headwear") && !shoeGenders[product.product_url])} onClick={() => previewProduct(product)}>{product.product_type === "footwear" ? "Try these shoes" : `Try this ${product.product_type}`}</button>}
       </div>)}</div>
       {productPageCount > 1 && <nav className="product-pagination" aria-label="Product pages">
         <button className="secondary" disabled={productPage === 0} onClick={() => setProductPage((page) => page - 1)}>Previous page</button>

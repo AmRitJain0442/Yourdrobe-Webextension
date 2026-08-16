@@ -18,6 +18,7 @@ class FakeYouCam:
         self.enabled = True
         self.created: list[tuple[str, str, str]] = []
         self.created_shoes: list[tuple[str, str, str]] = []
+        self.created_hats: list[tuple[str, str, str]] = []
         self.polled: list[tuple[str, int, str]] = []
         self.failure: YouCamFailure | None = None
         self.download_failure: YouCamFailure | None = None
@@ -33,6 +34,12 @@ class FakeYouCam:
         if self.failure:
             raise self.failure
         return StartedTask("provider-shoes-task", 1, "shoes")
+
+    def create_hat_task(self, source: str, reference: str, gender: str) -> StartedTask:
+        self.created_hats.append((source, reference, gender))
+        if self.failure:
+            raise self.failure
+        return StartedTask("provider-hat-task", 1, "hat")
 
     def get_task(self, task_id: str, key_index: int, task_kind: str = "clothes") -> ProviderTaskState:
         self.polled.append((task_id, key_index, task_kind))
@@ -133,33 +140,43 @@ class ApiJourneyTest(unittest.TestCase):
         main.youcam = FakeYouCam()
         self.assertEqual(self.client.get("/v1/capabilities").json(), {
             "tryon_provider": "youcam",
-            "live_product_types": ["top", "outerwear", "dress", "bottom", "footwear"],
-            "youcam_product_types": ["top", "outerwear", "bottom", "dress", "footwear"],
+            "live_product_types": ["headwear", "top", "outerwear", "dress", "bottom", "footwear"],
+            "youcam_product_types": ["headwear", "top", "outerwear", "bottom", "dress", "footwear"],
             "google_product_types": [],
         })
 
-    def test_google_tryon_supports_every_non_youcam_category_and_returns_local_result(self) -> None:
+    def test_google_is_not_used_for_tryon(self) -> None:
+        main.youcam = FakeYouCam()
         main.profile_generator.tryon_enabled = True
         session_id = self.client.post("/v1/sessions", json={}).json()["session_id"]
         profile_id = self.create_profile(session_id, ("full_body_front",))
+        product_id = self.create_product("unused", "eyewear")
+        response = self.client.post("/v1/tryons/batch", json={
+            "session_id": session_id,
+            "profile_id": profile_id,
+            "product_ids": [product_id],
+            "assets": [{"kind": "full_body_front", "image_data_url": "data:image/jpeg;base64,cGhvdG8="}],
+            "cloud_consent": True,
+        })
+        self.assertEqual(response.json()["jobs"][0]["error_code"], "unsupported_live_category")
+        self.assertEqual(main.profile_generator.tryons, [])
 
-        for product_type in main.GOOGLE_TYPES:
-            with self.subTest(product_type=product_type):
-                product_id = self.create_product("unused", product_type)
-                response = self.client.post("/v1/tryons/batch", json={
-                    "session_id": session_id,
-                    "profile_id": profile_id,
-                    "product_ids": [product_id],
-                    "assets": [{"kind": "full_body_front", "image_data_url": "data:image/jpeg;base64,cGhvdG8="}],
-                    "cloud_consent": True,
-                })
-                job = response.json()["jobs"][0]
-                self.assertEqual(job["status"], "completed")
-                self.assertTrue(job["result_url"].startswith("http://127.0.0.1:8001/v1/tryons/"))
-                result = self.client.get(f"/v1/tryons/{job['job_id']}/result-image")
-                self.assertEqual((result.status_code, result.content, result.headers["content-type"]), (200, b"google-rendered", "image/png"))
+    def test_live_headwear_uses_hat_api_with_active_outfit(self) -> None:
+        provider = FakeYouCam()
+        main.youcam = provider
+        product_id = self.create_product("unused", "headwear")
+        products[product_id]["metadata"] = {"gender": "female"}
+        body = self.live_batch(product_id)
+        body["outfit_base_image_data_url"] = "data:image/jpeg;base64,b3V0Zml0"
 
-        self.assertEqual([call[3] for call in main.profile_generator.tryons], main.GOOGLE_TYPES)
+        response = self.client.post("/v1/tryons/batch", json=body)
+        self.assertEqual(response.status_code, 200)
+        job_id = response.json()["jobs"][0]["job_id"]
+        self.assertEqual(provider.created_hats, [(
+            "data:image/jpeg;base64,b3V0Zml0", "https://images.example/headwear.jpg", "female",
+        )])
+        self.assertEqual(self.client.get(f"/v1/tryons/{job_id}").json()["status"], "completed")
+        self.assertEqual(provider.polled[-1], ("provider-hat-task", 1, "hat"))
 
     def test_live_dress_creates_and_polls_provider_job(self) -> None:
         provider = FakeYouCam()

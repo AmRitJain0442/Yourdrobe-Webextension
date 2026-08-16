@@ -385,6 +385,28 @@ describe("App", () => {
     expect(requestBody("/tryons/batch").outfit_base_image_data_url).toBe("data:image/jpeg;base64,active");
   });
 
+  it("asks for a preview model before trying headwear", async () => {
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      products: [{ ...product, title: "Baseball cap", product_type: "headwear", product_url: "https://amazon.in/dp/CAP" }],
+    });
+
+    await renderApp();
+    const gender = host.querySelector('select[aria-label="Hat preview model"]') as HTMLSelectElement;
+    expect(gender).not.toBeNull();
+    await act(async () => {
+      gender.value = "male";
+      gender.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await click("Try this headwear");
+
+    expect(requestBody("/products/normalize").products).toEqual([
+      expect.objectContaining({ title: "Baseball cap", product_type: "headwear", metadata: expect.objectContaining({ gender: "male" }) }),
+    ]);
+  });
+
   it("finalizes every selected product into retailer carts", async () => {
     const items = [
       { platform: "amazon_in" as const, title: "Saved linen top", product_type: "top" as const, product_url: activeTop.metadata.product_url, image_url: "https://example.com/top.jpg" },

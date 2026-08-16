@@ -121,22 +121,16 @@ PRODUCT_REQUIREMENTS = {
     "ring": (("full_body_front",),),
     "footwear": (("full_body_front",),),
 }
-YOUCAM_TYPES = ["top", "outerwear", "bottom", "dress", "footwear"]
+YOUCAM_TYPES = ["headwear", "top", "outerwear", "bottom", "dress", "footwear"]
 YOUCAM_MAPPING = {
+    "headwear": ("full_body_front", "hat"),
     "top": ("full_body_front", "upper_body"),
     "outerwear": ("full_body_front", "upper_body"),
     "bottom": ("full_body_front", "lower_body"),
     "dress": ("full_body_front", "full_body"),
     "footwear": ("full_body_front", "shoes"),
 }
-GOOGLE_TYPES = [
-    "makeup", "eyewear", "headwear", "earrings", "necklace", "belt", "bag", "watch", "bracelet", "ring",
-]
-GOOGLE_MAPPING = {product_type: "full_body_front" for product_type in GOOGLE_TYPES}
-ALL_LIVE_TYPES = [
-    "makeup", "eyewear", "headwear", "earrings", "necklace", "top", "outerwear", "dress", "bottom",
-    "belt", "bag", "watch", "bracelet", "ring", "footwear",
-]
+ALL_LIVE_TYPES = ["headwear", "top", "outerwear", "dress", "bottom", "footwear"]
 
 
 def new_id(prefix: str) -> str:
@@ -156,17 +150,15 @@ def health() -> dict[str, str]:
 
 @app.get("/v1/capabilities")
 def capabilities() -> dict[str, object]:
-    google_enabled = bool(getattr(profile_generator, "tryon_enabled", False))
     live_types = [
         product_type for product_type in ALL_LIVE_TYPES
-        if (product_type in YOUCAM_MAPPING and youcam.enabled) or (product_type in GOOGLE_MAPPING and google_enabled)
+        if product_type in YOUCAM_MAPPING and youcam.enabled
     ]
-    provider = "hybrid" if youcam.enabled and google_enabled else "youcam" if youcam.enabled else "google" if google_enabled else "mock"
     return {
-        "tryon_provider": provider,
+        "tryon_provider": "youcam" if youcam.enabled else "mock",
         "live_product_types": live_types,
         "youcam_product_types": YOUCAM_TYPES if youcam.enabled else [],
-        "google_product_types": GOOGLE_TYPES if google_enabled else [],
+        "google_product_types": [],
     }
 
 
@@ -243,7 +235,6 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
         for alternatives in PRODUCT_REQUIREMENTS.get(product["product_type"], ()):
             if (
                 body.outfit_base_image_data_url
-                and product["product_type"] in (YOUCAM_MAPPING | GOOGLE_MAPPING)
                 and "full_body_front" in alternatives
             ):
                 continue
@@ -256,8 +247,7 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
     if missing:
         raise HTTPException(422, {"code": "missing_profile_assets", "roles": sorted(missing)})
 
-    google_enabled = bool(getattr(profile_generator, "tryon_enabled", False))
-    if not youcam.enabled and not google_enabled:
+    if not youcam.enabled:
         created = []
         for product_id, product in zip(body.product_ids, resolved_products):
             job_id = new_id("tryon")
@@ -272,8 +262,7 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
         return {"jobs": created}
 
     has_supported_product = any(
-        (product["product_type"] in YOUCAM_MAPPING and youcam.enabled)
-        or (product["product_type"] in GOOGLE_MAPPING and google_enabled)
+        product["product_type"] in YOUCAM_MAPPING and youcam.enabled
         for product in resolved_products
     )
     if has_supported_product and not body.cloud_consent:
@@ -283,11 +272,7 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
     if not body.outfit_base_image_data_url:
         for product in resolved_products:
             product_type = product["product_type"]
-            role = (
-                YOUCAM_MAPPING[product_type][0]
-                if youcam.enabled and product_type in YOUCAM_MAPPING
-                else GOOGLE_MAPPING.get(product_type) if google_enabled else None
-            )
+            role = YOUCAM_MAPPING[product_type][0] if youcam.enabled and product_type in YOUCAM_MAPPING else None
             if role and role not in asset_by_role:
                 missing.add(role)
     if missing:
@@ -298,12 +283,15 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
         job_id = new_id("tryon")
         product_type = product["product_type"]
         mapping = YOUCAM_MAPPING.get(product_type) if youcam.enabled else None
-        google_role = GOOGLE_MAPPING.get(product_type) if google_enabled else None
         if mapping:
             try:
                 source = body.outfit_base_image_data_url or asset_by_role[mapping[0]]
                 if product_type == "footwear":
                     started = youcam.create_shoes_task(
+                        source, product["image_url"], product.get("metadata", {}).get("gender", ""),
+                    )
+                elif product_type == "headwear":
+                    started = youcam.create_hat_task(
                         source, product["image_url"], product.get("metadata", {}).get("gender", ""),
                     )
                 else:
@@ -323,31 +311,6 @@ def create_tryons(body: BatchInput) -> dict[str, list[dict]]:
                     "provider_task_id": started.task_id,
                     "provider_key_index": started.key_index,
                     "provider_task_kind": started.task_kind,
-                    "mock": False,
-                }
-        elif google_role:
-            try:
-                source = body.outfit_base_image_data_url or asset_by_role[google_role]
-                result_mime, result_bytes = profile_generator.generate_tryon(
-                    source, product["image_url"], product["title"], product_type,
-                )
-            except ProfileGenerationFailure as failure:
-                job = {
-                    "job_id": job_id,
-                    "product_id": product_id,
-                    "error_code": "google_tryon_failed",
-                    "error_message": str(failure),
-                    "mock": False,
-                }
-            else:
-                job = {
-                    "job_id": job_id,
-                    "product_id": product_id,
-                    "provider": "google",
-                    "result_bytes": result_bytes,
-                    "result_mime": result_mime,
-                    "result_url": f"http://127.0.0.1:8001/v1/tryons/{job_id}/result-image",
-                    "completed": True,
                     "mock": False,
                 }
         else:
@@ -386,14 +349,6 @@ def get_tryon(job_id: str) -> dict:
             "status": "completed",
             "result_url": job["result_url"],
             "mock": True,
-        }
-    if job.get("provider") == "google" and job.get("completed") is True:
-        return {
-            "job_id": job_id,
-            "product_id": job["product_id"],
-            "status": "completed",
-            "result_url": job["result_url"],
-            "mock": False,
         }
     if "error_code" in job:
         return {
@@ -442,8 +397,6 @@ def get_tryon_result_image(job_id: str) -> Response:
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Try-on job not found")
-    if job.get("provider") == "google" and job.get("completed") is True:
-        return Response(content=job["result_bytes"], media_type=job["result_mime"])
     if not (
         job.get("mock") is False
         and job.get("completed") is True
