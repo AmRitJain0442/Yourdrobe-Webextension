@@ -187,6 +187,26 @@ afterEach(() => {
 });
 
 describe("App", () => {
+  it("separates try-on and saved outfits with a bottom navigation dock", async () => {
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
+    vi.mocked(loadOutfitVersions).mockResolvedValue([{ ...activeTop, items: [] }, { ...activeDress, items: [] }]);
+
+    await renderApp();
+
+    const search = host.querySelector(".product-search") as HTMLElement;
+    const preview = host.querySelector("article.active-outfit") as HTMLElement;
+    expect(search.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(host.querySelector(".saved-outfit-carousel")).toBeNull();
+    expect(host.querySelector('.bottom-nav [aria-current="page"]')?.textContent).toContain("Try on");
+
+    await click("Wardrobe");
+
+    expect(host.querySelector(".saved-outfit-carousel")).not.toBeNull();
+    expect(host.querySelectorAll(".outfit-slide")).toHaveLength(1);
+    expect(host.querySelector(".product-page")).toBeNull();
+    expect(host.querySelector('.bottom-nav [aria-current="page"]')?.textContent).toContain("Wardrobe");
+  });
+
   it("shows 25 products per page and lets the user browse the rest", async () => {
     (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
@@ -358,8 +378,8 @@ describe("App", () => {
     vi.mocked(selectOutfitVersion).mockResolvedValue({ ...activeTop, items: [topItem] });
 
     await renderApp();
-    expect(host.querySelectorAll(".fan-card")).toHaveLength(2);
-    await act(async () => { (host.querySelectorAll(".fan-card")[0] as HTMLButtonElement).click(); await Promise.resolve(); });
+    await click("Wardrobe");
+    await act(async () => { (host.querySelector('button[aria-label="Previous outfit"]') as HTMLButtonElement).click(); await Promise.resolve(); });
 
     expect(selectOutfitVersion).toHaveBeenCalledWith(activeTop.metadata.job_id);
     expect(host.querySelector("article.active-outfit img")?.getAttribute("src")).toBe(activeTop.image_data_url);
@@ -388,7 +408,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await renderApp();
-    await act(async () => { (host.querySelector("button") as HTMLButtonElement).click(); });
+    await click("Try these products");
 
     expect(host.textContent).toContain("Full-body source photo");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -411,7 +431,7 @@ describe("App", () => {
 
     await renderApp();
     await act(async () => {
-      (host.querySelector("button") as HTMLButtonElement).click();
+      [...host.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Try this "))?.click();
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
@@ -506,7 +526,7 @@ describe("App", () => {
 
     expect(host.textContent).toContain("YouCam AI preview");
     expect(host.textContent).not.toContain("Mock AI preview");
-    expect(host.querySelector("img")?.alt).toBe("Preview of Daily essential");
+    expect(host.querySelector<HTMLImageElement>(".results-section img")?.alt).toBe("Preview of Daily essential");
     expect(JSON.stringify((chrome.storage.local.set as ReturnType<typeof vi.fn>).mock.calls)).not.toContain("provider.example/result.jpg");
   });
 
@@ -826,7 +846,7 @@ describe("App", () => {
     await completeRun();
 
     expect(host.textContent).toContain("This product preview failed.");
-    expect(host.querySelector("article.product img")).toBeNull();
+    expect(host.querySelector(".results-section article.product img")).toBeNull();
   });
 
   it("shows the provider failure and original listing", async () => {
@@ -858,12 +878,12 @@ describe("App", () => {
     await renderApp();
 
     expect(host.textContent).toContain("Choose product type for Daily essential");
-    const select = host.querySelector("select") as HTMLSelectElement;
+    const select = host.querySelector(".catalog-item select") as HTMLSelectElement;
     await act(async () => {
       select.value = "dress";
       select.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    await act(async () => { (host.querySelector("button") as HTMLButtonElement).click(); });
+    await click("Try this dress");
 
     expect(host.textContent).toContain("Full-body source photo");
   });
@@ -884,7 +904,7 @@ describe("App", () => {
 
     await renderApp();
     await act(async () => {
-      (host.querySelector("button") as HTMLButtonElement).click();
+      [...host.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Try this "))?.click();
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
@@ -901,7 +921,7 @@ describe("App", () => {
 
     await renderApp();
     await act(async () => {
-      (host.querySelector("button") as HTMLButtonElement).click();
+      [...host.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Try this "))?.click();
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -1085,7 +1105,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", vi.fn(fetchResult));
     await renderApp();
     await act(async () => {
-      (host.querySelector("button") as HTMLButtonElement).click();
+      [...host.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Try this "))?.click();
       await Promise.resolve();
       await Promise.resolve();
     });

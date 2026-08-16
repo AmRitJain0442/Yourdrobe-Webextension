@@ -33,4 +33,10 @@ describe("side panel button contrast", () => {
     expect(css).toMatch(/\.preview-strip\s*{[^}]*display:\s*flex;[^}]*overflow-x:\s*auto;[^}]*scroll-snap-type:\s*x mandatory;/);
     expect(css).toMatch(/\.preview-strip > \*\s*{[^}]*flex:\s*0 0 min\(86%,\s*320px\);[^}]*scroll-snap-align:\s*start;/);
   });
+
+  it("keeps tab navigation docked and the wardrobe carousel unstacked", () => {
+    expect(css).toMatch(/\.bottom-nav\s*{[^}]*position:\s*fixed;[^}]*bottom:\s*12px;/);
+    expect(css).toMatch(/\.carousel-stage\s*{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*44px minmax\(0, 1fr\) 44px;/);
+    expect(css).not.toContain(".fan-card");
+  });
 });

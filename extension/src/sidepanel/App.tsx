@@ -10,6 +10,7 @@ import { ProfileManager } from "./ProfileManager";
 import { YouCamConsent } from "./YouCamConsent";
 
 type Phase = "loading" | "profile-setup" | "profile-manager" | "youcam-consent" | "ready" | "running" | "results" | "empty" | "error";
+type AppTab = "try-on" | "wardrobe";
 type Result = { product: NormalizedProduct; job: TryOnJob };
 type FinalizeResult = { added: number; needs_attention: string[]; carts_opened: number; error?: string };
 const unsupported = "Open a supported Amazon, Flipkart, or Nykaa listing page and try again.";
@@ -64,6 +65,7 @@ const outfitItem = (product: Product): OutfitItem | null => product.product_type
 
 export function App() {
   const [phase, setPhase] = useState<Phase>("loading");
+  const [activeTab, setActiveTab] = useState<AppTab>("try-on");
   const [products, setProducts] = useState<Product[]>([]);
   const [productPage, setProductPage] = useState(0);
   const [profile, setProfile] = useState<ProfileMetadata | null>(null);
@@ -443,21 +445,32 @@ export function App() {
 
   const productPageCount = Math.ceil(products.length / productPageSize);
   const visibleProducts = products.slice(productPage * productPageSize, (productPage + 1) * productPageSize);
+  const browsing = (["loading", "ready", "running", "results", "empty", "error"] as Phase[]).includes(phase);
 
   return <main>
     <header className="app-header"><div className="brand-mark" aria-hidden="true">Y</div><div><span className="eyebrow">Yourdrobe</span><h1>Your fitting room, anywhere.</h1></div><span className="header-sparkle" aria-hidden="true">✦</span></header>
-    {phase === "loading" && <section className="loading-state" aria-live="polite"><span aria-hidden="true">✦</span><p role="status">Reading products from this page...</p></section>}
-    {(phase === "ready" || phase === "results") && activeOutfit && <ActiveOutfitPanel outfit={activeOutfit} outfits={outfitVersions} items={outfitItems} busy={outfitBusy || finalizeBusy} onSelect={(index) => void chooseOutfitVersion(index)} onRemove={(url) => void removeSelectedProduct(url)} onFinalize={() => void finalizeOutfit()} onReset={() => void resetActiveOutfit()} />}
-    {(phase === "ready" || phase === "results") && outfitStatus && <p className="outfit-message" role="status">{outfitStatus}</p>}
-    {(phase === "ready" || phase === "results") && outfitError && <p className="error outfit-message" role="alert">{outfitError}</p>}
-    {(phase === "ready" || phase === "results") && finalizeStatus && <p className="outfit-message" role="status">{finalizeStatus}</p>}
-    {(phase === "ready" || phase === "results") && finalizeError && <p className="error outfit-message" role="alert">{finalizeError}</p>}
     {phase === "profile-setup" && <ProfileSetup existingRoles={(Object.keys(profile?.assets ?? {}) as PhotoRole[]).filter((role) =>
       !missing.some((requirement) => rolesForRequirement(requirement).includes(role))
     )} onSaved={() => void reloadProfile().then(() => setPhase("ready"))} onCancel={() => setPhase("ready")} />}
     {phase === "profile-manager" && <ProfileManager profile={profile} legacyImage={legacyImage} onChanged={reloadProfile} onClose={() => setPhase(products.length ? "ready" : "empty")} />}
     {phase === "youcam-consent" && <div className="youcam-consent"><YouCamConsent busy={consentBusy} error={consentError} onAccept={() => void acceptYouCamConsent()} onCancel={() => setPhase("ready")} /></div>}
-    {phase === "ready" && <section className="catalog-section">
+    {browsing && activeTab === "try-on" && <div className="tab-page" id="try-on-panel" role="tabpanel" aria-labelledby="try-on-tab">
+      <section className="product-search" aria-labelledby="product-search-heading">
+        <div className="section-heading"><div><span className="eyebrow">Discover</span><h2 id="product-search-heading">Find your next piece</h2></div><span aria-hidden="true">✦</span></div>
+        <form onSubmit={(event) => void searchProducts(event)}>
+          <label className="search-query">Search products<input type="search" required minLength={2} maxLength={100} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Try baggy jeans..." /></label>
+          <label className="store-picker">Store<select aria-label="Marketplace" value={searchStore} onChange={(event) => setSearchStore(event.target.value as SearchStore)}>{searchStores.map((store) => <option key={store.value} value={store.value}>{store.label}</option>)}</select></label>
+          <button className="search-button" disabled={searchBusy}><span className="sr-only">Search</span></button>
+        </form>
+        {searchError && <p className="error" role="alert">{searchError}</p>}
+      </section>
+      {(phase === "ready" || phase === "results") && activeOutfit && <ActiveOutfitPanel outfit={activeOutfit} outfits={outfitVersions} items={outfitItems} busy={outfitBusy || finalizeBusy} onSelect={(index) => void chooseOutfitVersion(index)} onRemove={(url) => void removeSelectedProduct(url)} onFinalize={() => void finalizeOutfit()} onReset={() => void resetActiveOutfit()} />}
+      {(phase === "ready" || phase === "results") && outfitStatus && <p className="outfit-message" role="status">{outfitStatus}</p>}
+      {(phase === "ready" || phase === "results") && outfitError && <p className="error outfit-message" role="alert">{outfitError}</p>}
+      {(phase === "ready" || phase === "results") && finalizeStatus && <p className="outfit-message" role="status">{finalizeStatus}</p>}
+      {(phase === "ready" || phase === "results") && finalizeError && <p className="error outfit-message" role="alert">{finalizeError}</p>}
+      {phase === "loading" && <section className="loading-state" aria-live="polite"><span aria-hidden="true">✦</span><p role="status">Reading products from this page...</p></section>}
+      {(phase === "ready" || phase === "results") && <section className="catalog-section">
       <div className="section-heading"><div><span className="eyebrow">Shop this page</span><h2>{products.length} products ready</h2></div><span className="result-count">{productPage * productPageSize + 1}–{Math.min((productPage + 1) * productPageSize, products.length)}</span></div>
       <div className="list product-page">{visibleProducts.map((product, index) => <div className="catalog-item" key={product.product_url}><ProductRow product={product} />
         {(!product.product_type || product.product_type === "unknown") && <label>Choose product type for {product.title}<select required value={product.product_type ?? "unknown"} onChange={(event) => setProducts((current) => current.map((item, itemIndex) => itemIndex === productPage * productPageSize + index ? { ...item, product_type: event.target.value as ProductType } : item))}><option value="unknown">Choose product type</option>{selectableProductTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
@@ -471,11 +484,10 @@ export function App() {
         <span aria-live="polite">Page {productPage + 1} of {productPageCount}</span>
         <button className="secondary" disabled={productPage + 1 === productPageCount} onClick={() => setProductPage((page) => page + 1)}>Next page</button>
       </nav>}
-      <button className="secondary" disabled={outfitBusy} onClick={openProfileManager}>Manage profile</button>
-    </section>}
-    {phase === "running" && <p role="status">Creating your previews...</p>}
-    {phase === "empty" && <section><h2>No products found on this page.</h2><p>Browse a product listing or search results on this supported site, then retry.</p><button onClick={() => location.reload()}>Retry</button></section>}
-    {phase === "results" && <section className="results-section">
+      </section>}
+      {phase === "running" && <p role="status">Creating your previews...</p>}
+      {phase === "empty" && <section><h2>No products found on this page.</h2><p>Browse a product listing or search results on this supported site, then retry.</p><button onClick={() => location.reload()}>Retry</button></section>}
+      {phase === "results" && <section className="results-section">
       <div className="section-heading"><div><span className="eyebrow">AI fitting room</span><h2>Your previews</h2></div><span aria-hidden="true">✦</span></div>
       <div className="list preview-strip">{results.map(({ product, job }) => {
         const failed = job.status === "failed" || (job.mock === false && !isHttpsUrl(job.result_url));
@@ -488,28 +500,34 @@ export function App() {
           <a className="button secondary" href={product.product_url} target="_blank" rel="noreferrer">View original product</a>
         </article>;
       })}</div>
-      <button className="secondary" disabled={outfitBusy} onClick={openProfileManager}>Manage profile</button>
-    </section>}
-    {phase === "error" && <section><p className="error" role="alert">{error}</p><button onClick={() => location.reload()}>Retry</button></section>}
-    {(["ready", "results", "empty", "error"] as Phase[]).includes(phase) && <section className="product-search" aria-labelledby="product-search-heading">
-      <div className="section-heading"><div><span className="eyebrow">Discover</span><h2 id="product-search-heading">Find your next piece</h2></div><span aria-hidden="true">✦</span></div>
-      <form onSubmit={(event) => void searchProducts(event)}>
-        <label>What are you looking for?<input type="search" required minLength={2} maxLength={100} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search or describe what you want..." /></label>
-        <label>Store<select aria-label="Marketplace" value={searchStore} onChange={(event) => setSearchStore(event.target.value as SearchStore)}>{searchStores.map((store) => <option key={store.value} value={store.value}>{store.label}</option>)}</select></label>
-        <button className="search-button" disabled={searchBusy}>{searchBusy ? "Searching..." : "Search"}</button>
-      </form>
-      {searchError && <p className="error" role="alert">{searchError}</p>}
-    </section>}
+      </section>}
+      {phase === "error" && <section><p className="error" role="alert">{error}</p><button onClick={() => location.reload()}>Retry</button></section>}
+      {(["ready", "results", "empty", "error"] as Phase[]).includes(phase) && <button className="secondary manage-profile" disabled={outfitBusy} onClick={openProfileManager}>Manage profile</button>}
+    </div>}
+    {browsing && activeTab === "wardrobe" && <div className="tab-page" id="wardrobe-panel" role="tabpanel" aria-labelledby="wardrobe-tab">
+      {activeOutfit && outfitVersions.length
+        ? <ActiveOutfitPanel wardrobe outfit={activeOutfit} outfits={outfitVersions} items={outfitItems} busy={outfitBusy || finalizeBusy} onSelect={(index) => void chooseOutfitVersion(index)} onRemove={(url) => void removeSelectedProduct(url)} onFinalize={() => void finalizeOutfit()} onReset={() => void resetActiveOutfit()} />
+        : <section className="wardrobe-empty"><span aria-hidden="true">◇</span><h2>Your wardrobe is empty</h2><p>Save a generated outfit to compare it here.</p><button onClick={() => setActiveTab("try-on")}>Start trying products</button></section>}
+      {outfitStatus && <p className="outfit-message" role="status">{outfitStatus}</p>}
+      {outfitError && <p className="error outfit-message" role="alert">{outfitError}</p>}
+      {finalizeStatus && <p className="outfit-message" role="status">{finalizeStatus}</p>}
+      {finalizeError && <p className="error outfit-message" role="alert">{finalizeError}</p>}
+    </div>}
+    {browsing && <nav className="bottom-nav" aria-label="Extension navigation">
+      <button id="try-on-tab" className="try-on-tab" type="button" aria-current={activeTab === "try-on" ? "page" : undefined} aria-controls="try-on-panel" onClick={() => setActiveTab("try-on")}>Try on</button>
+      <button id="wardrobe-tab" className="wardrobe-tab" type="button" aria-current={activeTab === "wardrobe" ? "page" : undefined} aria-controls="wardrobe-panel" onClick={() => setActiveTab("wardrobe")}>Wardrobe</button>
+    </nav>}
   </main>;
 }
 
-function ActiveOutfitPanel({ outfit, outfits, items, busy, onSelect, onRemove, onFinalize, onReset }: { outfit: ActiveOutfit; outfits: CompiledOutfit[]; items: OutfitItem[]; busy: boolean; onSelect: (index: number) => void; onRemove: (url: string) => void; onFinalize: () => void; onReset: () => void }) {
+function ActiveOutfitPanel({ outfit, outfits, items, busy, wardrobe = false, onSelect, onRemove, onFinalize, onReset }: { outfit: ActiveOutfit; outfits: CompiledOutfit[]; items: OutfitItem[]; busy: boolean; wardrobe?: boolean; onSelect: (index: number) => void; onRemove: (url: string) => void; onFinalize: () => void; onReset: () => void }) {
   const displayed = items.length ? items : [{ title: outfit.metadata.product_title, product_type: outfit.metadata.product_type, product_url: outfit.metadata.product_url }];
   const activeIndex = outfits.findIndex((saved) => saved.metadata.job_id === outfit.metadata.job_id);
-  return <article className="product active-outfit" aria-labelledby="active-outfit-heading">
-    <div className="section-heading"><div><span className="eyebrow">Your current look</span><h2 id="active-outfit-heading">Active outfit</h2></div><span className="badge">✦ AI look</span></div>
-    <img src={outfit.image_data_url} alt={`Active outfit: ${outfit.metadata.product_title}`} />
-    {outfits.length > 0 && <div className="outfit-comparison"><h3>Compare saved outfits</h3><p>Select the version you want to continue building or finalize.</p><CardFanCarousel cards={outfits.map((saved) => ({ id: saved.metadata.job_id, imgUrl: saved.image_data_url, alt: `Saved outfit ending with ${saved.metadata.product_title}` }))} activeIndex={activeIndex} onSelect={onSelect} /></div>}
+  return <article className={`product active-outfit${wardrobe ? " wardrobe-panel" : ""}`} aria-labelledby={wardrobe ? "wardrobe-heading" : "active-outfit-heading"}>
+    <div className="section-heading"><div><span className="eyebrow">{wardrobe ? `${outfits.length} saved ${outfits.length === 1 ? "look" : "looks"}` : "Your current look"}</span><h2 id={wardrobe ? "wardrobe-heading" : "active-outfit-heading"}>{wardrobe ? "Wardrobe" : "Active outfit"}</h2></div><span className="badge">✦ AI look</span></div>
+    {wardrobe
+      ? <CardFanCarousel cards={outfits.map((saved) => ({ id: saved.metadata.job_id, imgUrl: saved.image_data_url, alt: `Saved outfit ending with ${saved.metadata.product_title}` }))} activeIndex={activeIndex} onSelect={onSelect} />
+      : <img src={outfit.image_data_url} alt={`Active outfit: ${outfit.metadata.product_title}`} />}
     <div><h3>{displayed.length} selected {displayed.length === 1 ? "product" : "products"}</h3><ul className="outfit-items">{displayed.map((item) => <li key={item.product_url}><span>{item.title} · {item.product_type}</span>{items.length > 0 && !activeOutfitProductTypes.has(item.product_type) && <button className="text-action" disabled={busy} aria-label={`Remove ${item.title}`} onClick={() => onRemove(item.product_url)}>Remove</button>}</li>)}</ul></div>
     <p>Saved browser-locally on this device. Using it for another live preview uploads this saved image to Perfect Corp.</p>
     <p>Finalizing visits each product in this tab, adds available items, and leaves this tab on the final retailer cart. If an item needs a size, colour, or sign-in, the process stops there for you.</p>
