@@ -31,3 +31,7 @@ export type TryOnJob = {
 export type ExtractProductsResponse =
   | { ok: true; products: Product[] }
   | { ok: false; error: string };
+
+export type AddToCartResponse =
+  | { ok: true }
+  | { ok: false; error: string };
