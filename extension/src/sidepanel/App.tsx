@@ -82,9 +82,9 @@ export function App() {
   const [finalizeStatus, setFinalizeStatus] = useState("");
   const [finalizeError, setFinalizeError] = useState("");
   const activeRequest = useRef<AbortController | null>(null);
+  const pendingProducts = useRef<Product[]>([]);
   const outfitMutation = useRef(false);
   const mounted = useRef(true);
-  const canExtendActiveOutfit = Boolean(activeOutfit) && products.slice(0, 5).some((product) => activeOutfitProductTypes.has(product.product_type ?? "unknown"));
 
   useEffect(() => {
     mounted.current = true;
@@ -116,6 +116,7 @@ export function App() {
       void extractProducts(tabId).then((foundProducts) => {
         if (cancelled) return;
         setProducts(foundProducts);
+        pendingProducts.current = [];
         if (foundProducts[0]) setSearchStore(foundProducts[0].platform);
         setResults([]);
         setError("");
@@ -163,15 +164,17 @@ export function App() {
     }
   }
 
-  async function runDemo(currentProfile = profile) {
+  async function runDemo(currentProfile = profile, requestedProducts?: Product[]) {
     if (outfitMutation.current) return;
+    if (requestedProducts) pendingProducts.current = requestedProducts;
     const savedRoles = new Set(Object.keys(currentProfile?.assets ?? {}) as PhotoRole[]);
     if (profilePhotoRoles.some((role) => !savedRoles.has(role))) {
       setMissing([]);
       setPhase("profile-setup");
       return;
     }
-    const selectedProducts = products.slice(0, 5).filter((product) => !activeOutfit || activeOutfitProductTypes.has(product.product_type ?? "unknown"));
+    const candidates = requestedProducts ?? (pendingProducts.current.length ? pendingProducts.current : products.slice(0, 5));
+    const selectedProducts = candidates.filter((product) => !activeOutfit || activeOutfitProductTypes.has(product.product_type ?? "unknown"));
     if (!selectedProducts.length) return;
     const outfitBaseImageDataUrl = activeOutfit && selectedProducts.some((product) => activeOutfitProductTypes.has(product.product_type ?? "unknown"))
       ? activeOutfit.image_data_url
@@ -411,9 +414,9 @@ export function App() {
       <div className="list preview-strip">{products.map((product, index) => <div key={product.product_url}><ProductRow product={product} />
         {(!product.product_type || product.product_type === "unknown") && <label>Choose product type for {product.title}<select required value={product.product_type ?? "unknown"} onChange={(event) => setProducts((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, product_type: event.target.value as ProductType } : item))}><option value="unknown">Choose product type</option>{selectableProductTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>}
         {activeOutfit && product.product_type && product.product_type !== "unknown" && !activeOutfitProductTypes.has(product.product_type) && <button className="secondary" disabled={outfitBusy} onClick={() => void addWithoutPreview(product)}>Add to outfit without preview</button>}
+        {product.product_type && product.product_type !== "unknown" && activeOutfitProductTypes.has(product.product_type) && <button disabled={outfitBusy} onClick={() => void runDemo(profile, [product])}>Try this {product.product_type}</button>}
+        {!activeOutfit && product.product_type && product.product_type !== "unknown" && !activeOutfitProductTypes.has(product.product_type) && <p className="preview-unavailable">AI preview is not available for {product.product_type} with the current provider.</p>}
       </div>)}</div>
-      {canExtendActiveOutfit && <p><strong>Add-on mode:</strong> clothing previews will start from your saved active outfit.</p>}
-      {(!activeOutfit || products.some((product) => activeOutfitProductTypes.has(product.product_type ?? "unknown"))) && <button disabled={outfitBusy || products.some((product) => !product.product_type || product.product_type === "unknown")} onClick={() => void runDemo()}>{canExtendActiveOutfit ? "Add these products to active outfit" : "Try these products"}</button>}
       <button className="secondary" disabled={outfitBusy} onClick={openProfileManager}>Manage profile</button>
     </section>}
     {phase === "running" && <p role="status">Creating your previews...</p>}

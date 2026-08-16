@@ -102,7 +102,9 @@ async function click(name: string) {
   await act(async () => {
     const buttons = [...host.querySelectorAll("button")];
     (buttons.find((button) => button.textContent === name)
-      ?? (name === "Try these products" ? buttons.find((button) => button.textContent === "Add these products to active outfit") : undefined))?.click();
+      ?? (["Try these products", "Add these products to active outfit"].includes(name)
+        ? buttons.find((button) => button.textContent?.startsWith("Try this "))
+        : undefined))?.click();
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
@@ -199,6 +201,24 @@ describe("App", () => {
     expect(host.textContent).not.toContain("Daily essential");
   });
 
+  it("generates a preview only for the product whose card action was selected", async () => {
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [
+      { ...product, title: "Linen shirt", product_type: "top", product_url: "https://amazon.in/dp/TOP" },
+      { ...product, title: "Baggy jeans", product_type: "bottom", product_url: "https://amazon.in/dp/JEANS" },
+    ] });
+
+    await renderApp();
+    expect(host.textContent).toContain("Try this top");
+    expect(host.textContent).toContain("Try this bottom");
+    await click("Try this bottom");
+
+    expect(requestBody("/products/normalize").products).toEqual([
+      expect.objectContaining({ title: "Baggy jeans", product_type: "bottom" }),
+    ]);
+  });
+
   it("searches a selected marketplace and keeps the active outfit for the new results", async () => {
     vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
     await renderApp();
@@ -230,8 +250,7 @@ describe("App", () => {
 
     expect(host.textContent).toContain("Baggy jeans");
     expect(host.textContent).toContain("Saved linen top");
-    expect(host.textContent).toContain("Add these products to active outfit");
-    expect(host.textContent).toContain("clothing previews will start from your saved active outfit");
+    expect(host.textContent).toContain("Try this bottom");
   });
 
   it("adds an unsupported accessory to the outfit without requesting a failed preview", async () => {
@@ -466,11 +485,8 @@ describe("App", () => {
       const body = url.endsWith("/capabilities") ? capabilities
         : url.endsWith("/sessions") ? { session_id: "session" }
           : url.endsWith("/profiles") ? { profile_id: "profile" }
-            : url.endsWith("/products/normalize") ? { products: [{ ...product, product_type: "bottom", id: "product" }, { ...secondProduct, id: "product-2" }] }
-              : { jobs: [
-                { job_id: "job", product_id: "product", status: "completed", mock: true, result_url: "https://example.com/one.jpg" },
-                { job_id: "job-2", product_id: "product-2", status: "completed", mock: true, result_url: "https://example.com/two.jpg" },
-              ] };
+            : url.endsWith("/products/normalize") ? { products: [{ ...product, product_type: "bottom", id: "product" }] }
+              : { jobs: [{ job_id: "job", product_id: "product", status: "completed", mock: true, result_url: "https://example.com/one.jpg" }] };
       return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
     });
 
@@ -486,10 +502,10 @@ describe("App", () => {
 
     expect(loadRequiredAssets).toHaveBeenCalledWith([]);
     const batch = requestBody("/tryons/batch");
-    expect(batch.product_ids).toEqual(["product", "product-2"]);
+    expect(batch.product_ids).toEqual(["product"]);
     expect(batch.outfit_base_image_data_url).toBe("data:image/jpeg;base64,active");
     expect(batch.assets).toEqual([]);
-    expect(requestBody("/products/normalize").products).toHaveLength(2);
+    expect(requestBody("/products/normalize").products).toHaveLength(1);
   });
 
   it("adds a bag without sending either profile or active-outfit images to the preview backend", async () => {
@@ -663,7 +679,7 @@ describe("App", () => {
     (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
     await renderApp();
     const resetButton = [...host.querySelectorAll("button")].find((item) => item.textContent === "Reset to original profile photo") as HTMLButtonElement;
-    const tryButton = [...host.querySelectorAll("button")].find((item) => item.textContent === "Add these products to active outfit") as HTMLButtonElement;
+    const tryButton = [...host.querySelectorAll("button")].find((item) => item.textContent === "Try this dress") as HTMLButtonElement;
 
     await act(async () => {
       resetButton.click();
