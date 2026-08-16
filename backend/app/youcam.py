@@ -1,10 +1,12 @@
 from dataclasses import dataclass
 import base64
 import os
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
 import httpx
+from dotenv import load_dotenv
 
 
 API_BASE = "https://yce-api-01.makeupar.com"
@@ -13,6 +15,7 @@ TASK_PATH = "/s2s/v2.0/task/cloth-v3"
 RETRYABLE_HTTP = {401, 403, 429}
 PROVIDER_TIMEOUT_SECONDS = 5.0
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 GarmentCategory = Literal["upper_body", "lower_body", "full_body"]
 
 
@@ -43,6 +46,7 @@ class YouCamClient:
 
     @classmethod
     def from_environment(cls) -> "YouCamClient":
+        load_dotenv(ENV_FILE, override=False)
         return cls.from_value(os.getenv("YOUCAM_API_KEYS", ""))
 
     @classmethod

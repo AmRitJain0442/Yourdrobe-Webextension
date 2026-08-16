@@ -1,10 +1,13 @@
 import json
 import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
 import httpx
 
+from app import youcam
 from app.youcam import ProviderTaskState, StartedTask, YouCamClient, YouCamFailure
 
 
@@ -52,6 +55,20 @@ class YouCamClientTest(unittest.TestCase):
         self.assertTrue(client.enabled)
         self.assertEqual(client.key_count, 2)
         self.assertNotIn("first", repr(client))
+
+    def test_reads_keys_from_backend_env_file(self) -> None:
+        with TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text("YOUCAM_API_KEYS=file-one,file-two\n")
+            with patch.dict(os.environ, {}, clear=True), patch.object(youcam, "ENV_FILE", env_file):
+                self.assertEqual(YouCamClient.from_environment().key_count, 2)
+
+    def test_process_keys_override_backend_env_file(self) -> None:
+        with TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text("YOUCAM_API_KEYS=file-one,file-two\n")
+            with patch.dict(os.environ, {"YOUCAM_API_KEYS": "shell-only"}, clear=True), patch.object(youcam, "ENV_FILE", env_file):
+                self.assertEqual(YouCamClient.from_environment().key_count, 1)
 
     def test_uploads_image_and_creates_clothes_v3_task(self) -> None:
         started = self.client.create_clothes_task(

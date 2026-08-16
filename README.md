@@ -28,15 +28,20 @@ backend/.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8001
 
 ### Live YouCam mode
 
-Set one or more real keys only in the backend process environment before starting Uvicorn:
+Copy the backend example file and add one or more real keys:
 
 ```powershell
-$env:YOUCAM_API_KEYS='first-api-key,second-api-key'
+Copy-Item backend/.env.example backend/.env
+# Edit backend/.env and set YOUCAM_API_KEYS=first-api-key,second-api-key
 $env:PYTHONPATH='backend'
 backend/.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8001
 ```
 
-Keys are tried in the order listed. Never commit keys, put them in files, or bundle them into the extension; they are read from the backend process environment only.
+Keys are tried in the order listed. Never commit keys or bundle them into the extension. A PowerShell process variable remains an optional higher-priority override:
+
+```powershell
+$env:YOUCAM_API_KEYS='first-api-key,second-api-key'
+```
 
 ## Load the extension in Chrome
 
