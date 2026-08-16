@@ -337,7 +337,11 @@ describe("App", () => {
 
   it("previews an accessory on the active outfit with Google", async () => {
     vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
-    vi.mocked(loadProfile).mockResolvedValue({ ...fullBodyProfile, cloud_tryon_consented_at: "2026-08-16T00:00:00.000Z" });
+    vi.mocked(loadProfile).mockResolvedValue({
+      ...fullBodyProfile,
+      cloud_tryon_consented_at: "2026-08-16T00:00:00.000Z",
+      assets: { full_body_front: fullBodyProfile.assets.full_body_front },
+    });
     vi.mocked(loadOutfitItems).mockResolvedValue([{
       platform: "amazon_in", title: "Saved linen top", product_type: "top",
       product_url: activeTop.metadata.product_url, image_url: "https://example.com/top.jpg",
@@ -415,19 +419,20 @@ describe("App", () => {
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: "FINALIZE_OUTFIT", items: [topItem] });
   });
 
-  it("requires all five core photos even when the product source photo exists", async () => {
+  it("accepts a saved full-body profile without requiring derived views", async () => {
     vi.mocked(loadProfile).mockResolvedValue({
       ...fullBodyProfile,
       assets: { full_body_front: fullBodyProfile.assets.full_body_front },
     });
+    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
     (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
 
     await renderApp();
     await click("Try these products");
 
-    expect(host.textContent).toContain("Create your profile from one photo");
-    expect(host.querySelectorAll('input[type="file"]')).toHaveLength(1);
-    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/sessions"))).toBe(false);
+    expect(host.textContent).toContain("Your previews");
+    expect(loadRequiredAssets).toHaveBeenCalledWith(["full_body_front"]);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/sessions"))).toBe(true);
   });
 
   it("opens full-body setup before requesting a dress without profile metadata", async () => {

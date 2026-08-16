@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { ExtractProductsResponse, Product, ProductType, TryOnJob } from "../types";
-import { missingRequirements, profilePhotoRoles, requirementsForProducts, rolesForRequirement } from "../profile/requirements";
+import { missingRequirements, requirementsForProducts, rolesForRequirement } from "../profile/requirements";
 import { deleteActiveOutfit, LocalProfileAssetMissingError, loadActiveOutfit, loadLegacyImage, loadOutfitItems, loadOutfitVersions, loadProfile, loadRequiredAssets, removeOutfitItem, saveCompiledOutfit, saveYouCamConsent, selectOutfitVersion } from "../profile/store";
 import type { ActiveOutfit, CompiledOutfit, OutfitItem, PhotoRole, ProfileMetadata, RequirementKey } from "../profile/types";
 import CardFanCarousel from "../components/ui/card-fan-carousel";
@@ -184,12 +184,6 @@ export function App() {
   async function runDemo(currentProfile = profile, requestedProducts?: Product[]) {
     if (outfitMutation.current) return;
     if (requestedProducts) pendingProducts.current = requestedProducts;
-    const savedRoles = new Set(Object.keys(currentProfile?.assets ?? {}) as PhotoRole[]);
-    if (profilePhotoRoles.some((role) => !savedRoles.has(role))) {
-      setMissing([]);
-      setPhase("profile-setup");
-      return;
-    }
     const candidates = requestedProducts ?? (pendingProducts.current.length ? pendingProducts.current : products.slice(0, 5));
     const selectedProducts = candidates.filter((product) => !activeOutfit || activeOutfitProductTypes.has(product.product_type ?? "unknown"));
     if (!selectedProducts.length) return;
