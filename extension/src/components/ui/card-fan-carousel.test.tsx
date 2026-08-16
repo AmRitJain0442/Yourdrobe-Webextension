@@ -30,6 +30,7 @@ it("renders saved outfits as selectable cards with carousel controls", async () 
   expect(host.querySelectorAll('button[aria-label="Previous outfit"]')).toHaveLength(1);
   expect(host.querySelectorAll('button[aria-label="Next outfit"]')).toHaveLength(1);
   expect(host.querySelector('[aria-pressed="true"] img')?.getAttribute("alt")).toBe("Outfit 1");
+  expect(host.querySelectorAll('.fan-card[aria-hidden="true"][tabindex="-1"]')).toHaveLength(1);
 
   await act(async () => (host.querySelectorAll(".fan-card")[3] as HTMLButtonElement).click());
   expect(onSelect).toHaveBeenCalledWith(3);

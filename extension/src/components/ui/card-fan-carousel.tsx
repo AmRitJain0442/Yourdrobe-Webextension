@@ -86,6 +86,7 @@ export default function CardFanCarousel({ cards, activeIndex, onSelect }: Props)
     const visible = visibleMap(centerIndex);
     const previous = previousVisible.current;
     const first = !entered.current;
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     const multiplier = responsiveMultiplier(window.innerWidth);
     const vertical = heightMultiplier(window.innerWidth);
     const slots = paginated ? MAX_VISIBLE : total;
@@ -109,7 +110,10 @@ export default function CardFanCarousel({ cards, activeIndex, onSelect }: Props)
           x: `${position.x * multiplier}rem`, y: `${position.y * vertical}rem`, rotation: position.rot,
           scale: position.scale, opacity: 1, zIndex: position.zIndex,
         };
-        if (first) {
+        if (reducedMotion) {
+          gsap.set(element, target);
+          done();
+        } else if (first) {
           gsap.set(element, { x: 0, y: `${12 * vertical}rem`, rotation: 0, scale: 0.5, opacity: 0 });
           gsap.to(element, { ...target, duration: 1.2, ease: "elastic.out(1.05,.78)", delay: 0.2 + slot * 0.06, onComplete: done });
         } else if (!wasVisible) {
@@ -117,12 +121,14 @@ export default function CardFanCarousel({ cards, activeIndex, onSelect }: Props)
           gsap.set(element, { x: `${enteringRight ? 40 : -40}rem`, y: target.y, rotation: enteringRight ? 30 : -30, scale: 0.5, opacity: 0 });
           gsap.to(element, { ...target, duration: 0.6, ease: "power2.out", onComplete: done });
         } else gsap.to(element, { ...target, duration: 0.5, ease: "power2.out", onComplete: done });
-      } else if (wasVisible) {
+      } else if (reducedMotion) gsap.set(element, { opacity: 0, scale: 0.3, x: 0, y: 0, zIndex: 0 });
+      else if (wasVisible) {
         const exitingLeft = direction.current === "right";
         gsap.to(element, { x: `${exitingLeft ? -40 : 40}rem`, opacity: 0, scale: 0.5, rotation: exitingLeft ? -30 : 30, duration: 0.4, ease: "power2.in", zIndex: 0 });
       } else if (first) gsap.set(element, { opacity: 0, scale: 0.3, x: 0, y: 0, zIndex: 0 });
     });
     previousVisible.current = new Set(visible.keys());
+    if (reducedMotion) return () => gsap.killTweensOf(elements);
 
     const entries = elements.flatMap((element, index) => {
       const slot = visible.get(index);
@@ -178,10 +184,12 @@ export default function CardFanCarousel({ cards, activeIndex, onSelect }: Props)
   }, [centerIndex, total, paginated, visibleMap]);
 
   if (!total) return null;
+  const currentlyVisible = visibleMap(centerIndex);
   const chevron = (left: boolean) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><polyline points={left ? "15 18 9 12 15 6" : "9 18 15 12 9 6"} /></svg>;
   return <section className="card-fan-carousel" aria-label="Saved outfit comparison">
     <div ref={containerRef} className="fan-layout">{cards.map((card, index) => <button
       type="button" key={card.id} className="fan-card" aria-pressed={index === activeIndex}
+      aria-hidden={!currentlyVisible.has(index)} tabIndex={currentlyVisible.has(index) ? 0 : -1}
       aria-label={`${card.alt ?? `Outfit ${index + 1}`}${index === activeIndex ? ", selected" : ""}`}
       onClick={() => onSelect(index)}
     ><img src={card.imgUrl} loading="lazy" alt={card.alt ?? `Outfit ${index + 1}`} /></button>)}</div>
