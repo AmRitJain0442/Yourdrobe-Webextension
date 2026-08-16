@@ -183,6 +183,32 @@ describe("profile store", () => {
   });
 
   it.each([
+    ["version", { ...outfitMetadata(), version: 2 }],
+    ["required field", { ...outfitMetadata(), product_url: 42 }],
+    ["product type", { ...outfitMetadata(), product_type: "cape" }],
+    ["unexpected field", { ...outfitMetadata(), result_url: "https://provider.example/render.jpg" }],
+  ])("cleans both active-outfit parts when metadata has an invalid %s", async (_label, metadata) => {
+    await chrome.storage.local.set({ yourdrobe_active_outfit_v1: metadata });
+    await putRawAsset("active_outfit", new Blob(["render"], { type: "image/jpeg" }));
+
+    expect(await loadActiveOutfit()).toBeNull();
+    expect(values.yourdrobe_active_outfit_v1).toBeUndefined();
+    expect(await rawAsset("active_outfit")).toBeUndefined();
+  });
+
+  it.each([
+    ["MIME type", outfitMetadata(), () => new Blob(["render"], { type: "image/png" })],
+    ["byte size", { ...outfitMetadata(), byte_size: 3 }, () => new Blob(["render"], { type: "image/jpeg" })],
+  ])("cleans an interrupted active-outfit replacement whose %s does not match the blob", async (_label, metadata, createBlob) => {
+    await chrome.storage.local.set({ yourdrobe_active_outfit_v1: metadata });
+    await putRawAsset("active_outfit", createBlob());
+
+    expect(await loadActiveOutfit()).toBeNull();
+    expect(values.yourdrobe_active_outfit_v1).toBeUndefined();
+    expect(await rawAsset("active_outfit")).toBeUndefined();
+  });
+
+  it.each([
     ["zero-byte", () => new Blob([], { type: "image/jpeg" })],
     ["non-image", () => new Blob(["render"], { type: "text/plain" })],
   ])("cleans a %s active-outfit blob and its metadata", async (_label, createBlob) => {

@@ -1,3 +1,4 @@
+import type { ProductType } from "../types";
 import { prepareProfileImage } from "./image";
 import type { ActiveOutfit, ActiveOutfitInput, ActiveOutfitMetadata, PhotoRole, PreparedProfileImage, ProfileAssetUpload, ProfileAttributes, ProfileMetadata } from "./types";
 
@@ -9,6 +10,10 @@ const activeOutfitBlobKey = "active_outfit";
 const activeOutfitMetadataKey = "yourdrobe_active_outfit_v1";
 const acceptedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const acceptedActiveOutfitTypes = new Set(["image/jpeg", "image/png"]);
+const acceptedProductTypes = new Set<ProductType>([
+  "makeup", "eyewear", "headwear", "earrings", "necklace", "top", "outerwear", "dress", "bottom",
+  "belt", "bag", "watch", "bracelet", "ring", "footwear", "unknown",
+]);
 const maxActiveOutfitBytes = 10 * 1024 * 1024;
 
 let database: Promise<IDBDatabase> | undefined;
@@ -86,6 +91,21 @@ async function validateActiveOutfitBlob(blob: Blob): Promise<void> {
   }
 }
 
+function isActiveOutfitMetadata(value: unknown): value is ActiveOutfitMetadata {
+  if (!value || typeof value !== "object") return false;
+  const metadata = value as Record<string, unknown>;
+  return Object.keys(metadata).length === 9
+    && metadata.version === 1
+    && typeof metadata.job_id === "string"
+    && typeof metadata.product_id === "string"
+    && typeof metadata.product_title === "string"
+    && acceptedProductTypes.has(metadata.product_type as ProductType)
+    && typeof metadata.product_url === "string"
+    && acceptedActiveOutfitTypes.has(metadata.mime_type as string)
+    && Number.isSafeInteger(metadata.byte_size) && (metadata.byte_size as number) > 0
+    && typeof metadata.saved_at === "string";
+}
+
 async function removeActiveOutfit(previousBlob?: Blob): Promise<void> {
   await transaction("readwrite", (store) => store.delete(activeOutfitBlobKey));
   try {
@@ -139,10 +159,16 @@ export function saveActiveOutfit(blob: Blob, input: ActiveOutfitInput): Promise<
 export function loadActiveOutfit(): Promise<ActiveOutfit | null> {
   return withProfileLock(async () => {
     const value = await chrome.storage.local.get(activeOutfitMetadataKey);
-    const metadata = value[activeOutfitMetadataKey] as ActiveOutfitMetadata | undefined;
+    const metadata = value[activeOutfitMetadataKey];
     const blob = await transaction<Blob | undefined>("readonly", (store) => store.get(activeOutfitBlobKey));
-    if (!metadata || !blob) {
-      if (metadata || blob) await removeActiveOutfit(blob);
+    if (!isActiveOutfitMetadata(metadata) || !blob) {
+      if (metadata !== undefined || blob) await removeActiveOutfit(blob);
+      return null;
+    }
+    // ponytail: separate stores cannot detect an interrupted same-MIME, same-size replacement;
+    // add a content digest or generation to the approved metadata contract if exact crash recovery is required.
+    if (metadata.mime_type !== blob.type || metadata.byte_size !== blob.size) {
+      await removeActiveOutfit(blob);
       return null;
     }
     try {
