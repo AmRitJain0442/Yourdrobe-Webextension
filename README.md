@@ -22,11 +22,12 @@ To force mock mode, including when `backend/.env` has keys, set a comma-only pro
 
 ```powershell
 $env:YOUCAM_API_KEYS=','
+$env:GOOGLE_APPLICATION_CREDENTIALS=''
 $env:PYTHONPATH='backend'
 backend/.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8001
 ```
 
-The backend then stays offline and returns results labelled `Mock AI preview`.
+The backend then stays offline, disables AI profile generation, and returns results labelled `Mock AI preview`.
 
 ### Live YouCam mode
 
@@ -45,6 +46,18 @@ Keys are tried in the order listed. Never commit keys or bundle them into the ex
 $env:YOUCAM_API_KEYS='first-api-key,second-api-key'
 ```
 
+### Nano Banana profile generation
+
+Keep `my-product-sa-key.json` outside the worktree and point the backend to it from `backend/.env` using an absolute path:
+
+```dotenv
+GOOGLE_APPLICATION_CREDENTIALS=D:/hackathons/Yourdrobe-Webextension/my-product-sa-key.json
+GOOGLE_CLOUD_LOCATION=global
+NANO_BANANA_MODEL=gemini-3.1-flash-image
+```
+
+The ignored credential file is read only by Google Application Default Credentials in the backend. It is never copied into the extension, committed, logged, or returned by an API. The service account's project must have Vertex AI enabled and permission to use the configured model.
+
 ## Load the extension in Chrome
 
 1. Open `chrome://extensions`.
@@ -52,7 +65,7 @@ $env:YOUCAM_API_KEYS='first-api-key,second-api-key'
 3. Choose **Load unpacked**.
 4. Select `extension/dist`.
 5. Open a search or category listing on Amazon India, Amazon US, Flipkart, or Nykaa.
-6. Click the extension action, upload the five required profile photos, and complete local profile consent.
+6. Click the extension action, upload one clear full-body photo, consent to Google processing, review the five generated photos, and save the generated profile.
 7. Run the mock or live flow for a supported listing as described below. Product links continue to open their source listing.
 
 The side panel can search Amazon India, Amazon US, Flipkart, or Nykaa for you. Choose a store, enter a product query, and Yourdrobe navigates the current tab to that store's search page before showing up to five retailer-ranked results in the panel. Each supported clothing card has its own **Try this top**, **Try this bottom**, **Try this dress**, or **Try this outerwear** action, so only the selected item generates a preview.
@@ -60,14 +73,15 @@ The side panel can search Amazon India, Amazon US, Flipkart, or Nykaa for you. C
 ## Live YouCam clothing previews and privacy
 
 - Live YouCam supports top, outerwear, bottom, and dress through Clothes V3, plus footwear through the separate Shoes API.
-- A profile requires exactly five uploads: front, left, and right face photos plus front and side full-body photos.
+- Profile creation accepts one clear full-body upload. Nano Banana generates front, left, and right face photos plus white-background front and side full-body photos at 2K resolution.
+- Generation makes five Vertex AI image requests. Review all five AI-generated views before saving because unseen angles, identity details, and body proportions can be inaccurate.
 - Yourdrobe does not ask for body measurements or clothing sizes.
 - Live clothing uses the front full-body profile photo when starting from the original profile photo.
 - Unsupported categories show a failure in live mode.
 - `Mock AI preview` appears only when no `YOUCAM_API_KEYS` are configured.
 - Once keys are configured, provider or product-image failures remain failures and never fall back to mock imagery.
 - The first live run requires separate Perfect Corp cloud-processing consent in addition to local profile consent.
-- Profile creation remains file-upload-only; guided camera capture is not implemented.
+- Profile creation remains file-upload-only; guided camera capture is not implemented. The source photo is sent through the local backend to Google Vertex AI only after explicit consent, and the backend does not persist it.
 - Required profile and retailer product images are sent to Perfect Corp for live processing. Perfect Corp may retain uploaded and generated assets for up to 30 days.
 - A completed live preview can be saved with **Use as active outfit**. Yourdrobe downloads and stores one rendered image browser-locally; it does not store the provider result URL.
 - Later live clothing previews use the active outfit as their source. Select one product card at a time, save its result, then select the next product to compose it.
@@ -89,8 +103,8 @@ This is a manual check only. It consumes provider units and is never run automat
 
 1. In a private shell, configure one real key using the live-mode setup above and start the backend.
 2. Build or reload the unpacked extension.
-3. Open a supported top listing, upload the five required profile photos, and accept cloud processing when prompted.
-4. Confirm the result is labelled `YouCam AI preview`, then select **Use as active outfit**.
+3. Open a supported top listing, upload one full-body source photo, consent to Google Vertex AI processing, and confirm five white-background generated previews appear before anything is saved.
+4. Save the generated profile, accept Perfect Corp processing when prompted, confirm the result is labelled `YouCam AI preview`, then select **Use as active outfit**.
 5. Search for a bottom such as baggy jeans in the side panel and confirm **Try this bottom** appears under each result and generates only the selected product's preview from the saved active outfit.
 6. Search for an accessory, select **Add to outfit without preview**, and confirm it appears in the selected-product list without a failed preview.
 7. Select **Finalize outfit in this tab**. Confirm the current tab visits each directly addable product and finishes on the last product's retailer cart. Confirm any product needing a size or other choice stops the sequence on its product page.
@@ -102,7 +116,7 @@ Run these commands from the repository root. They use no network provider calls:
 
 ```powershell
 $env:PYTHONPATH='backend'
-backend\.venv\Scripts\python.exe -m unittest backend.tests.test_youcam backend.tests.test_api -v
+backend\.venv\Scripts\python.exe -m unittest backend.tests.test_youcam backend.tests.test_profile_generation backend.tests.test_api -v
 npm.cmd --prefix extension test
 npm.cmd --prefix extension run build
 git diff --check
