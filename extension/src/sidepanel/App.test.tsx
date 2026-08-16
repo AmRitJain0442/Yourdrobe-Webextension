@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { deleteActiveOutfit, deleteProfile, LocalProfileAssetMissingError, loadActiveOutfit, loadOutfitItems, loadProfile, loadRequiredAssets, removeOutfitItem, saveActiveOutfit, saveOutfitItem, saveYouCamConsent } from "../profile/store";
+import { deleteActiveOutfit, deleteProfile, LocalProfileAssetMissingError, loadActiveOutfit, loadOutfitItems, loadOutfitVersions, loadProfile, loadRequiredAssets, removeOutfitItem, saveCompiledOutfit, saveOutfitItem, saveYouCamConsent, selectOutfitVersion } from "../profile/store";
 import type { ActiveOutfit, ProfileMetadata } from "../profile/types";
 import type { ProductType, TryOnJob } from "../types";
 import { getResultImage } from "./api";
@@ -13,7 +13,9 @@ vi.mock("../profile/store", () => ({
   loadLegacyImage: vi.fn().mockResolvedValue(null),
   loadActiveOutfit: vi.fn(),
   loadOutfitItems: vi.fn(),
-  saveActiveOutfit: vi.fn(),
+  loadOutfitVersions: vi.fn(),
+  saveCompiledOutfit: vi.fn(),
+  selectOutfitVersion: vi.fn(),
   saveOutfitItem: vi.fn(),
   removeOutfitItem: vi.fn(),
   deleteActiveOutfit: vi.fn(),
@@ -145,7 +147,9 @@ beforeEach(() => {
   vi.mocked(loadActiveOutfit).mockResolvedValue(null);
   vi.mocked(loadOutfitItems).mockResolvedValue([]);
   vi.mocked(loadRequiredAssets).mockResolvedValue([]);
-  vi.mocked(saveActiveOutfit).mockResolvedValue(activeDress);
+  vi.mocked(loadOutfitVersions).mockResolvedValue([]);
+  vi.mocked(saveCompiledOutfit).mockResolvedValue({ active: activeDress, items: [], outfits: [{ ...activeDress, items: [] }] });
+  vi.mocked(selectOutfitVersion).mockResolvedValue({ ...activeTop, items: [] });
   vi.mocked(saveOutfitItem).mockImplementation(async (item) => [item]);
   vi.mocked(removeOutfitItem).mockResolvedValue([]);
   vi.mocked(deleteActiveOutfit).mockResolvedValue();
@@ -316,6 +320,24 @@ describe("App", () => {
     expect(host.textContent).toContain("retailer cart is open");
   });
 
+  it("compares saved outfit versions and finalizes the selected version's products", async () => {
+    const topItem = { platform: "amazon_in" as const, title: "Saved linen top", product_type: "top" as const, product_url: activeTop.metadata.product_url, image_url: "https://example.com/top.jpg" };
+    const dressItem = { platform: "amazon_in" as const, title: "Daily essential", product_type: "dress" as const, product_url: activeDress.metadata.product_url, image_url: "https://example.com/dress.jpg" };
+    vi.mocked(loadActiveOutfit).mockResolvedValue(activeDress);
+    vi.mocked(loadOutfitItems).mockResolvedValue([dressItem]);
+    vi.mocked(loadOutfitVersions).mockResolvedValue([{ ...activeTop, items: [topItem] }, { ...activeDress, items: [dressItem] }]);
+    vi.mocked(selectOutfitVersion).mockResolvedValue({ ...activeTop, items: [topItem] });
+
+    await renderApp();
+    expect(host.querySelectorAll(".fan-card")).toHaveLength(2);
+    await act(async () => { (host.querySelectorAll(".fan-card")[0] as HTMLButtonElement).click(); await Promise.resolve(); });
+
+    expect(selectOutfitVersion).toHaveBeenCalledWith(activeTop.metadata.job_id);
+    expect(host.querySelector("article.active-outfit img")?.getAttribute("src")).toBe(activeTop.image_data_url);
+    await click("Finalize outfit in this tab");
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: "FINALIZE_OUTFIT", items: [topItem] });
+  });
+
   it("requires all five core photos even when the product source photo exists", async () => {
     vi.mocked(loadProfile).mockResolvedValue({
       ...fullBodyProfile,
@@ -464,11 +486,11 @@ describe("App", () => {
     mockCompletedJob();
 
     await completeRun();
-    await click("Use as active outfit");
+    await click("Add this to active outfit");
 
-    expect(saveActiveOutfit).toHaveBeenCalledWith(expect.any(Blob), expect.objectContaining({
+    expect(saveCompiledOutfit).toHaveBeenCalledWith(expect.any(Blob), expect.objectContaining({
       job_id: "job", product_id: "product", product_type: "dress",
-    }));
+    }), expect.objectContaining({ product_type: "dress" }));
     expect(host.textContent).toContain("Active outfit");
     expect(host.textContent).toContain("Saved browser-locally on this device.");
     expect(host.textContent).toContain("uploads this saved image to Perfect Corp");
@@ -490,9 +512,9 @@ describe("App", () => {
     });
 
     await completeRun();
-    await click("Use as active outfit");
+    await click("Add this to active outfit");
 
-    expect((vi.mocked(saveActiveOutfit).mock.calls[0][0] as Blob).type).toBe("image/png");
+    expect((vi.mocked(saveCompiledOutfit).mock.calls[0][0] as Blob).type).toBe("image/png");
   });
 
   it("uses a saved top as the shared source for later bottoms", async () => {
@@ -575,16 +597,16 @@ describe("App", () => {
   ] as const)("does not offer active-outfit saving for a %s result", async (_label, overrides) => {
     mockCompletedJob(overrides);
     await completeRun();
-    expect([...host.querySelectorAll("button")].some((button) => button.textContent === "Use as active outfit")).toBe(false);
+    expect([...host.querySelectorAll("button")].some((button) => button.textContent === "Add this to active outfit")).toBe(false);
   });
 
   it("preserves the previous outfit when saving fails", async () => {
     vi.mocked(loadActiveOutfit).mockResolvedValue(activeTop);
-    vi.mocked(saveActiveOutfit).mockRejectedValue(new Error("Storage unavailable."));
+    vi.mocked(saveCompiledOutfit).mockRejectedValue(new Error("Storage unavailable."));
     mockCompletedJob();
 
     await completeRun();
-    await click("Use as active outfit");
+    await click("Add this to active outfit");
 
     expect(host.querySelector("article.active-outfit")?.textContent).toContain("Saved linen top");
     expect(host.querySelector('[role="alert"]')?.textContent).toContain("Storage unavailable.");
@@ -617,11 +639,11 @@ describe("App", () => {
   });
 
   it("keeps active-outfit save single-flight and disabled while busy", async () => {
-    let finishSave!: (value: ActiveOutfit) => void;
-    vi.mocked(saveActiveOutfit).mockReturnValue(new Promise((resolve) => { finishSave = resolve; }));
+    let finishSave!: (value: Awaited<ReturnType<typeof saveCompiledOutfit>>) => void;
+    vi.mocked(saveCompiledOutfit).mockReturnValue(new Promise((resolve) => { finishSave = resolve; }));
     mockCompletedJob();
     await completeRun();
-    const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Use as active outfit") as HTMLButtonElement;
+    const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Add this to active outfit") as HTMLButtonElement;
 
     await act(async () => {
       button.click();
@@ -630,11 +652,11 @@ describe("App", () => {
       await Promise.resolve();
     });
 
-    expect(saveActiveOutfit).toHaveBeenCalledOnce();
+    expect(saveCompiledOutfit).toHaveBeenCalledOnce();
     expect(button.disabled).toBe(true);
     expect(host.querySelector('[role="status"]')?.textContent).toContain("Saving active outfit");
 
-    await act(async () => { finishSave(activeDress); await Promise.resolve(); });
+    await act(async () => { finishSave({ active: activeDress, items: [], outfits: [{ ...activeDress, items: [] }] }); await Promise.resolve(); });
   });
 
   it("blocks profile management while an active-outfit download is pending", async () => {
@@ -653,7 +675,7 @@ describe("App", () => {
       return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
     });
     await completeRun();
-    const saveButton = [...host.querySelectorAll("button")].find((item) => item.textContent === "Use as active outfit") as HTMLButtonElement;
+    const saveButton = [...host.querySelectorAll("button")].find((item) => item.textContent === "Add this to active outfit") as HTMLButtonElement;
     const manageButton = [...host.querySelectorAll("button")].find((item) => item.textContent === "Manage profile") as HTMLButtonElement;
 
     await act(async () => {
@@ -664,14 +686,14 @@ describe("App", () => {
 
     expect(host.textContent).not.toContain("Manage your profile");
     expect(([...host.querySelectorAll("button")].find((item) => item.textContent === "Manage profile") as HTMLButtonElement).disabled).toBe(true);
-    expect(saveActiveOutfit).not.toHaveBeenCalled();
+    expect(saveCompiledOutfit).not.toHaveBeenCalled();
 
     await act(async () => {
       finishDownload(new Response("render", { status: 200, headers: { "Content-Type": "image/jpeg" } }));
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(saveActiveOutfit).toHaveBeenCalledOnce();
+    expect(saveCompiledOutfit).toHaveBeenCalledOnce();
   });
 
   it("keeps active-outfit reset single-flight and disabled while busy", async () => {
@@ -738,9 +760,9 @@ describe("App", () => {
     });
 
     await completeRun();
-    await click("Use as active outfit");
+    await click("Add this to active outfit");
 
-    expect(saveActiveOutfit).not.toHaveBeenCalled();
+    expect(saveCompiledOutfit).not.toHaveBeenCalled();
     expect(host.querySelector("article.active-outfit")?.textContent).toContain("Saved linen top");
     const message = host.querySelector('[role="alert"]')?.textContent ?? "";
     expect(message).toContain("local backend");

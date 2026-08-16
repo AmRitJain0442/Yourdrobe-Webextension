@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { ExtractProductsResponse, Product, ProductType, TryOnJob } from "../types";
 import { missingRequirements, profilePhotoRoles, requirementsForProducts, rolesForRequirement } from "../profile/requirements";
-import { deleteActiveOutfit, LocalProfileAssetMissingError, loadActiveOutfit, loadLegacyImage, loadOutfitItems, loadProfile, loadRequiredAssets, removeOutfitItem, saveActiveOutfit, saveOutfitItem, saveYouCamConsent } from "../profile/store";
-import type { ActiveOutfit, OutfitItem, PhotoRole, ProfileMetadata, RequirementKey } from "../profile/types";
+import { deleteActiveOutfit, LocalProfileAssetMissingError, loadActiveOutfit, loadLegacyImage, loadOutfitItems, loadOutfitVersions, loadProfile, loadRequiredAssets, removeOutfitItem, saveCompiledOutfit, saveOutfitItem, saveYouCamConsent, selectOutfitVersion } from "../profile/store";
+import type { ActiveOutfit, CompiledOutfit, OutfitItem, PhotoRole, ProfileMetadata, RequirementKey } from "../profile/types";
+import CardFanCarousel from "../components/ui/card-fan-carousel";
 import { getCapabilities, getJob, getResultImage, MissingProfileAssetsError, startDemo, type NormalizedProduct } from "./api";
 import { ProfileSetup } from "./ProfileSetup";
 import { ProfileManager } from "./ProfileManager";
@@ -67,6 +68,7 @@ export function App() {
   const [legacyImage, setLegacyImage] = useState<string | null>(null);
   const [activeOutfit, setActiveOutfit] = useState<ActiveOutfit | null>(null);
   const [outfitItems, setOutfitItems] = useState<OutfitItem[]>([]);
+  const [outfitVersions, setOutfitVersions] = useState<CompiledOutfit[]>([]);
   const [missing, setMissing] = useState<RequirementKey[]>([]);
   const [results, setResults] = useState<Result[]>([]);
   const [error, setError] = useState("");
@@ -97,7 +99,8 @@ export function App() {
       loadLegacyImage(),
       loadActiveOutfit(),
       loadOutfitItems(),
-    ]).then(([foundProducts, foundProfile, foundLegacyImage, foundActiveOutfit, foundOutfitItems]) => {
+      loadOutfitVersions(),
+    ]).then(([foundProducts, foundProfile, foundLegacyImage, foundActiveOutfit, foundOutfitItems, foundOutfitVersions]) => {
       if (cancelled) return;
       setProducts(foundProducts);
       if (foundProducts[0]) setSearchStore(foundProducts[0].platform);
@@ -105,6 +108,7 @@ export function App() {
       setLegacyImage(foundLegacyImage);
       setActiveOutfit(foundActiveOutfit);
       setOutfitItems(foundOutfitItems);
+      setOutfitVersions(foundOutfitVersions);
       setPhase(foundProducts.length ? "ready" : "empty");
     }).catch((reason: unknown) => {
       if (cancelled) return;
@@ -139,11 +143,12 @@ export function App() {
   }, []);
 
   async function reloadProfile() {
-    const [nextProfile, nextLegacyImage, nextActiveOutfit, nextOutfitItems] = await Promise.all([loadProfile(), loadLegacyImage(), loadActiveOutfit(), loadOutfitItems()]);
+    const [nextProfile, nextLegacyImage, nextActiveOutfit, nextOutfitItems, nextOutfitVersions] = await Promise.all([loadProfile(), loadLegacyImage(), loadActiveOutfit(), loadOutfitItems(), loadOutfitVersions()]);
     setProfile(nextProfile);
     setLegacyImage(nextLegacyImage);
     setActiveOutfit(nextActiveOutfit);
     setOutfitItems(nextOutfitItems);
+    setOutfitVersions(nextOutfitVersions);
   }
 
   async function searchProducts(event: FormEvent<HTMLFormElement>) {
@@ -293,19 +298,20 @@ export function App() {
     setOutfitError("");
     try {
       const blob = await getResultImage(result.job.job_id);
-      const saved = await saveActiveOutfit(blob, {
+      const item = outfitItem(result.product);
+      if (!item) throw new Error("Choose a supported product type before saving this outfit.");
+      const saved = await saveCompiledOutfit(blob, {
         job_id: result.job.job_id,
         product_id: result.product.id,
         product_title: result.product.title,
         product_type: result.product.product_type ?? "unknown",
         product_url: result.product.product_url,
-      });
-      const item = outfitItem(result.product);
-      const nextItems = item ? await saveOutfitItem(item) : outfitItems;
+      }, item);
       if (!mounted.current) return;
-      setActiveOutfit(saved);
-      setOutfitItems(nextItems);
-      setOutfitStatus("Active outfit saved.");
+      setActiveOutfit(saved.active);
+      setOutfitItems(saved.items);
+      setOutfitVersions(saved.outfits);
+      setOutfitStatus("Outfit version saved and selected.");
     } catch (reason) {
       if (!mounted.current) return;
       setOutfitStatus("");
@@ -327,6 +333,7 @@ export function App() {
       if (!mounted.current) return;
       setActiveOutfit(null);
       setOutfitItems([]);
+      setOutfitVersions([]);
       setOutfitStatus("Active outfit reset.");
     } catch (reason) {
       if (!mounted.current) return;
@@ -349,6 +356,7 @@ export function App() {
       const nextItems = await saveOutfitItem(item);
       if (!mounted.current) return;
       setOutfitItems(nextItems);
+      setOutfitVersions(await loadOutfitVersions());
       setOutfitStatus("Product added without a generated preview.");
     } catch (reason) {
       if (!mounted.current) return;
@@ -376,6 +384,7 @@ export function App() {
     setOutfitBusy(true);
     try {
       setOutfitItems(await removeOutfitItem(productUrl));
+      setOutfitVersions(await loadOutfitVersions());
       setOutfitStatus("Product removed from outfit.");
     } catch (reason) {
       setOutfitError(reason instanceof Error ? reason.message : "We could not remove that product.");
@@ -404,6 +413,26 @@ export function App() {
     }
   }
 
+  async function chooseOutfitVersion(index: number) {
+    const version = outfitVersions[index];
+    if (!version || version.metadata.job_id === activeOutfit?.metadata.job_id || outfitMutation.current || finalizeBusy) return;
+    outfitMutation.current = true;
+    setOutfitBusy(true);
+    setOutfitError("");
+    try {
+      const selected = await selectOutfitVersion(version.metadata.job_id);
+      if (!mounted.current) return;
+      setActiveOutfit({ metadata: selected.metadata, image_data_url: selected.image_data_url });
+      setOutfitItems(selected.items);
+      setOutfitStatus("Saved outfit selected.");
+    } catch (reason) {
+      if (mounted.current) setOutfitError(reason instanceof Error ? reason.message : "We could not select that saved outfit.");
+    } finally {
+      outfitMutation.current = false;
+      if (mounted.current) setOutfitBusy(false);
+    }
+  }
+
   function openProfileManager() {
     if (!outfitMutation.current) setPhase("profile-manager");
   }
@@ -411,7 +440,7 @@ export function App() {
   return <main>
     <header><span className="eyebrow">Yourdrobe</span><h1>Your fitting room, anywhere.</h1></header>
     {phase === "loading" && <p role="status">Reading products from this page...</p>}
-    {(phase === "ready" || phase === "results") && activeOutfit && <ActiveOutfitPanel outfit={activeOutfit} items={outfitItems} busy={outfitBusy || finalizeBusy} onRemove={(url) => void removeSelectedProduct(url)} onFinalize={() => void finalizeOutfit()} onReset={() => void resetActiveOutfit()} />}
+    {(phase === "ready" || phase === "results") && activeOutfit && <ActiveOutfitPanel outfit={activeOutfit} outfits={outfitVersions} items={outfitItems} busy={outfitBusy || finalizeBusy} onSelect={(index) => void chooseOutfitVersion(index)} onRemove={(url) => void removeSelectedProduct(url)} onFinalize={() => void finalizeOutfit()} onReset={() => void resetActiveOutfit()} />}
     {(phase === "ready" || phase === "results") && outfitStatus && <p className="outfit-message" role="status">{outfitStatus}</p>}
     {(phase === "ready" || phase === "results") && outfitError && <p className="error outfit-message" role="alert">{outfitError}</p>}
     {(phase === "ready" || phase === "results") && finalizeStatus && <p className="outfit-message" role="status">{finalizeStatus}</p>}
@@ -443,7 +472,7 @@ export function App() {
           {failed
             ? <p className="error">{job.error_message ?? "This product preview failed. You can still view the original listing."}</p>
             : <img src={job.result_url || product.image_url} alt={`Preview of ${product.title}`} />}
-          {job.status === "completed" && job.mock === false && isHttpsUrl(job.result_url) && <button disabled={outfitBusy} onClick={() => void useAsActiveOutfit({ product, job })}>Use as active outfit</button>}
+          {job.status === "completed" && job.mock === false && isHttpsUrl(job.result_url) && <button disabled={outfitBusy} onClick={() => void useAsActiveOutfit({ product, job })}>Add this to active outfit</button>}
           <a className="button secondary" href={product.product_url} target="_blank" rel="noreferrer">View original product</a>
         </article>;
       })}</div>
@@ -463,11 +492,13 @@ export function App() {
   </main>;
 }
 
-function ActiveOutfitPanel({ outfit, items, busy, onRemove, onFinalize, onReset }: { outfit: ActiveOutfit; items: OutfitItem[]; busy: boolean; onRemove: (url: string) => void; onFinalize: () => void; onReset: () => void }) {
+function ActiveOutfitPanel({ outfit, outfits, items, busy, onSelect, onRemove, onFinalize, onReset }: { outfit: ActiveOutfit; outfits: CompiledOutfit[]; items: OutfitItem[]; busy: boolean; onSelect: (index: number) => void; onRemove: (url: string) => void; onFinalize: () => void; onReset: () => void }) {
   const displayed = items.length ? items : [{ title: outfit.metadata.product_title, product_type: outfit.metadata.product_type, product_url: outfit.metadata.product_url }];
+  const activeIndex = outfits.findIndex((saved) => saved.metadata.job_id === outfit.metadata.job_id);
   return <article className="product active-outfit" aria-labelledby="active-outfit-heading">
     <h2 id="active-outfit-heading">Active outfit</h2>
     <img src={outfit.image_data_url} alt={`Active outfit: ${outfit.metadata.product_title}`} />
+    {outfits.length > 0 && <div className="outfit-comparison"><h3>Compare saved outfits</h3><p>Select the version you want to continue building or finalize.</p><CardFanCarousel cards={outfits.map((saved) => ({ id: saved.metadata.job_id, imgUrl: saved.image_data_url, alt: `Saved outfit ending with ${saved.metadata.product_title}` }))} activeIndex={activeIndex} onSelect={onSelect} /></div>}
     <div><h3>{displayed.length} selected {displayed.length === 1 ? "product" : "products"}</h3><ul className="outfit-items">{displayed.map((item) => <li key={item.product_url}><span>{item.title} · {item.product_type}</span>{items.length > 0 && !activeOutfitProductTypes.has(item.product_type) && <button className="text-action" disabled={busy} aria-label={`Remove ${item.title}`} onClick={() => onRemove(item.product_url)}>Remove</button>}</li>)}</ul></div>
     <p>Saved browser-locally on this device. Using it for another live preview uploads this saved image to Perfect Corp.</p>
     <p>Finalizing visits each product in this tab, adds available items, and leaves this tab on the final retailer cart. If an item needs a size, colour, or sign-in, the process stops there for you.</p>

@@ -18,6 +18,7 @@ const acceptedProductTypes = new Set<ProductType>([
   "belt", "bag", "watch", "bracelet", "ring", "footwear", "unknown",
 ]);
 const maxActiveOutfitBytes = 10 * 1024 * 1024;
+const maxOutfitVersions = 50;
 const platformHosts: Record<OutfitItem["platform"], string> = {
   amazon_in: "amazon.in", amazon_us: "amazon.com", flipkart: "flipkart.com", nykaa: "nykaa.com",
 };
@@ -163,7 +164,7 @@ async function storedOutfitVersions(): Promise<StoredOutfitVersion[]> {
   const value = await chrome.storage.local.get(outfitVersionsKey);
   const versions = value[outfitVersionsKey];
   if (versions === undefined) return [];
-  if (!Array.isArray(versions) || versions.length > 50 || !versions.every(isStoredOutfitVersion)) {
+  if (!Array.isArray(versions) || versions.length > maxOutfitVersions || !versions.every(isStoredOutfitVersion)) {
     await chrome.storage.local.remove(outfitVersionsKey);
     return [];
   }
@@ -294,6 +295,7 @@ export function saveCompiledOutfit(blob: Blob, input: ActiveOutfitInput, item: O
       ? [{ metadata: previousMetadata, items: previousItems }]
       : [];
     const nextVersions = [...versions, ...migrated].filter((version) => version.metadata.job_id !== metadata.job_id);
+    if (nextVersions.length >= maxOutfitVersions) throw new Error("You have reached the 50 saved outfit limit. Reset the outfit history before saving another.");
     nextVersions.push({ metadata, items });
     const createdKeys = [outfitVersionBlobKey(metadata.job_id)];
     if (migrated.length && previousBlob) {

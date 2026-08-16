@@ -189,6 +189,16 @@ describe("profile store", () => {
     expect(await rawAsset("outfit_version:job-top")).toBeUndefined();
   });
 
+  it("keeps existing versions instead of silently pruning them at the local limit", async () => {
+    const top = { platform: "amazon_in" as const, title: "Blue top", product_type: "top" as const, product_url: "https://amazon.in/dp/TOP", image_url: "https://images.example/top.jpg" };
+    await chrome.storage.local.set({ yourdrobe_outfit_versions_v1: Array.from({ length: 50 }, (_, index) => ({
+      metadata: { ...outfitMetadata(), job_id: `saved-${index}` }, items: [top],
+    })) });
+
+    await expect(saveCompiledOutfit(new Blob(["new"], { type: "image/jpeg" }), { ...outfitInput, job_id: "new" }, top)).rejects.toThrow("50 saved outfit limit");
+    expect((values.yourdrobe_outfit_versions_v1 as unknown[])).toHaveLength(50);
+  });
+
   it.each([
     ["zero-byte", () => new Blob([], { type: "image/jpeg" })],
     ["non-image", () => new Blob(["render"], { type: "image/webp" })],
