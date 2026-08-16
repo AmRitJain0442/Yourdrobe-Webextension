@@ -15,6 +15,14 @@ describe("profile requirements", () => {
     ])).toEqual(["face_front", "full_body_front", "hand_wrist", "feet_front"]);
   });
 
+  it("requires one full-body image for every live clothing type", () => {
+    expect(requirementsForProducts([
+      product("top"), product("outerwear"), product("bottom"), product("dress"),
+    ])).toEqual(["full_body_front"]);
+    expect(missingRequirements([product("top")], ["upper_body_front"]))
+      .toEqual(["full_body_front"]);
+  });
+
   it("accepts either hand for jewellery", () => {
     expect(missingRequirements([product("ring")], ["right_hand_wrist"])).toEqual([]);
     expect(rolesForRequirement("hand_wrist")).toEqual(["left_hand_wrist", "right_hand_wrist"]);

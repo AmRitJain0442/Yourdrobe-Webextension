@@ -95,8 +95,8 @@ PRODUCT_REQUIREMENTS = {
     "headwear": (("face_front",),),
     "earrings": (("face_front",),),
     "necklace": (("upper_body_front",),),
-    "top": (("upper_body_front",),),
-    "outerwear": (("upper_body_front",),),
+    "top": (("full_body_front",),),
+    "outerwear": (("full_body_front",),),
     "dress": (("full_body_front",),),
     "bottom": (("full_body_front",),),
     "belt": (("full_body_front",),),
@@ -108,8 +108,8 @@ PRODUCT_REQUIREMENTS = {
 }
 LIVE_TYPES = ["top", "outerwear", "bottom", "dress"]
 LIVE_MAPPING = {
-    "top": ("upper_body_front", "upper_body"),
-    "outerwear": ("upper_body_front", "upper_body"),
+    "top": ("full_body_front", "upper_body"),
+    "outerwear": ("full_body_front", "upper_body"),
     "bottom": ("full_body_front", "lower_body"),
     "dress": ("full_body_front", "full_body"),
 }

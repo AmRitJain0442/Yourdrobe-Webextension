@@ -3,7 +3,7 @@ import type { PhotoRole, RequirementKey } from "./types";
 
 const requirements: Partial<Record<ProductType, RequirementKey>> = {
   makeup: "face_front", eyewear: "face_front", headwear: "face_front", earrings: "face_front",
-  necklace: "upper_body_front", top: "upper_body_front", outerwear: "upper_body_front",
+  necklace: "upper_body_front", top: "full_body_front", outerwear: "full_body_front",
   dress: "full_body_front", bottom: "full_body_front", belt: "full_body_front", bag: "full_body_front",
   watch: "hand_wrist", bracelet: "hand_wrist", ring: "hand_wrist", footwear: "feet_front",
 };

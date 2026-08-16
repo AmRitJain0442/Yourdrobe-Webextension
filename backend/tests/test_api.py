@@ -111,10 +111,22 @@ class ApiJourneyTest(unittest.TestCase):
     def test_live_categories_map_to_provider_garments(self) -> None:
         provider = FakeYouCam()
         main.youcam = provider
-        for product_type, garment in (("top", "upper_body"), ("outerwear", "upper_body"), ("bottom", "lower_body")):
+        cases = {
+            "top": ("upper_body", "data:image/jpeg;base64,ZnVsbA=="),
+            "outerwear": ("upper_body", "data:image/jpeg;base64,ZnVsbA=="),
+            "bottom": ("lower_body", "data:image/jpeg;base64,ZnVsbA=="),
+            "dress": ("full_body", "data:image/jpeg;base64,ZnVsbA=="),
+        }
+        for product_type, (garment, source) in cases.items():
             product_id = self.create_product("unused", product_type)
-            response = self.client.post("/v1/tryons/batch", json=self.live_batch(product_id))
+            body = self.live_batch(product_id)
+            body["assets"] = [
+                {"kind": "upper_body_front", "image_data_url": "data:image/jpeg;base64,dXBwZXI="},
+                {"kind": "full_body_front", "image_data_url": "data:image/jpeg;base64,ZnVsbA=="},
+            ]
+            response = self.client.post("/v1/tryons/batch", json=body)
             self.assertEqual(response.status_code, 200)
+            self.assertEqual(provider.created[-1][0], source)
             self.assertEqual(provider.created[-1][2], garment)
 
     def test_live_batch_requires_cloud_consent(self) -> None:
