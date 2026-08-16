@@ -23,6 +23,8 @@ export type TryOnJob = {
   status: "queued" | "processing" | "completed" | "failed";
   progress?: number;
   result_url?: string;
+  error_code?: string;
+  error_message?: string;
   mock?: boolean;
 };
 

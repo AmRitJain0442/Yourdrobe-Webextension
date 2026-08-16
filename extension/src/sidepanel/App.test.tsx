@@ -1,8 +1,9 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { deleteProfile, LocalProfileAssetMissingError, loadProfile, loadRequiredAssets } from "../profile/store";
+import { deleteProfile, LocalProfileAssetMissingError, loadProfile, loadRequiredAssets, saveYouCamConsent } from "../profile/store";
 import type { ProfileMetadata } from "../profile/types";
+import type { ProductType, TryOnJob } from "../types";
 import { App } from "./App";
 
 vi.mock("../profile/store", () => ({
@@ -10,11 +11,15 @@ vi.mock("../profile/store", () => ({
   loadRequiredAssets: vi.fn(),
   loadLegacyImage: vi.fn().mockResolvedValue(null),
   deleteProfile: vi.fn(),
+  saveYouCamConsent: vi.fn(),
   LocalProfileAssetMissingError: class extends Error {},
 }));
 
-let root: Root;
+let root: Root | null;
 let host: HTMLDivElement;
+let fetchMock: ReturnType<typeof vi.fn>;
+let capabilities: { tryon_provider: "mock" | "youcam"; live_product_types: ProductType[] };
+let batchJob: TryOnJob;
 const product = {
   platform: "amazon_in" as const,
   title: "Daily essential",
@@ -34,10 +39,47 @@ const fullBodyProfile: ProfileMetadata = {
 
 async function renderApp() {
   await act(async () => {
-    root.render(<App />);
+    root?.render(<App />);
     await Promise.resolve();
     await Promise.resolve();
   });
+}
+
+function mockCapabilities(tryon_provider: "mock" | "youcam", live_product_types: ProductType[]) {
+  capabilities = { tryon_provider, live_product_types };
+}
+
+function mockCompletedJob(overrides: Partial<TryOnJob> = {}) {
+  batchJob = { job_id: "job", product_id: "product", status: "completed", mock: false, result_url: "https://provider.example/result.jpg", ...overrides };
+}
+
+function requestBody(path: string) {
+  const request = fetchMock.mock.calls.find(([input]) => String(input).endsWith(path));
+  expect(request).toBeDefined();
+  return JSON.parse(String((request as [string | URL | Request, RequestInit])[1].body)) as Record<string, unknown>;
+}
+
+async function click(name: string) {
+  await act(async () => {
+    [...host.querySelectorAll("button")].find((button) => button.textContent === name)?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+async function checkYouCamConsentAndAccept() {
+  await act(async () => (host.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
+  await click("Agree and create live preview");
+}
+
+async function completeRun() {
+  vi.mocked(loadProfile).mockResolvedValue({ ...fullBodyProfile, youcam_consented_at: "2026-08-16T00:00:00.000Z" });
+  vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+  (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
+  await renderApp();
+  await click("Try these products");
 }
 
 beforeEach(() => {
@@ -52,13 +94,28 @@ beforeEach(() => {
   vi.mocked(loadProfile).mockResolvedValue(null);
   vi.mocked(loadRequiredAssets).mockResolvedValue([]);
   vi.mocked(deleteProfile).mockResolvedValue();
+  vi.mocked(saveYouCamConsent).mockResolvedValue({ ...fullBodyProfile, youcam_consented_at: "2026-08-16T00:00:00.000Z" });
+  capabilities = { tryon_provider: "mock", live_product_types: [] };
+  batchJob = { job_id: "job", product_id: "product", status: "completed", mock: true, result_url: "https://example.com/result.jpg" };
+  fetchMock = vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    const body = url.endsWith("/capabilities") ? capabilities
+      : url.endsWith("/sessions") ? { session_id: "session" }
+        : url.endsWith("/profiles") ? { profile_id: "profile" }
+          : url.endsWith("/products/normalize") ? { products: [{ ...product, product_type: "dress", id: "product" }] }
+            : url.endsWith("/tryons/batch") ? { jobs: [batchJob] }
+              : batchJob;
+    return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
 });
 
 afterEach(() => {
-  act(() => root.unmount());
+  if (root) act(() => root?.unmount());
+  root = null;
   host.remove();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -83,7 +140,8 @@ describe("App", () => {
     (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
     const fetchMock = vi.fn((input: string | URL | Request, _init: RequestInit) => {
       const url = String(input);
-      const body = url.endsWith("/sessions") ? { session_id: "session" }
+      const body = url.endsWith("/capabilities") ? { tryon_provider: "mock", live_product_types: [] }
+        : url.endsWith("/sessions") ? { session_id: "session" }
         : url.endsWith("/profiles") ? { profile_id: "profile" }
           : url.endsWith("/products/normalize") ? { products: [{ ...product, product_type: "dress", id: "product" }] }
             : { jobs: [{ job_id: "job", product_id: "product", status: "completed", result_url: "https://example.com/result.jpg" }] };
@@ -111,6 +169,111 @@ describe("App", () => {
     });
   });
 
+  it("requests one-time YouCam consent before the first live clothing run", async () => {
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
+    mockCapabilities("youcam", ["dress"]);
+
+    await renderApp();
+    await click("Try these products");
+
+    expect(host.textContent).toContain("Enable live YouCam previews");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/tryons/batch"))).toBe(false);
+  });
+
+  it("records consent and resumes the live run", async () => {
+    const consented = { ...fullBodyProfile, youcam_consented_at: "2026-08-16T00:00:00.000Z" };
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    vi.mocked(saveYouCamConsent).mockResolvedValue(consented);
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
+    mockCapabilities("youcam", ["dress"]);
+
+    await renderApp();
+    await click("Try these products");
+    await checkYouCamConsentAndAccept();
+
+    expect(saveYouCamConsent).toHaveBeenCalledOnce();
+    const batch = requestBody("/tryons/batch");
+    expect(batch.assets).toEqual([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    expect(batch.cloud_consent).toBe(true);
+  });
+
+  it("does not repeat consent for an already-consented profile", async () => {
+    vi.mocked(loadProfile).mockResolvedValue({ ...fullBodyProfile, youcam_consented_at: "2026-08-16T00:00:00.000Z" });
+    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
+    mockCapabilities("youcam", ["dress"]);
+
+    await renderApp();
+    await click("Try these products");
+
+    expect(host.textContent).not.toContain("Enable live YouCam previews");
+    expect(requestBody("/tryons/batch").cloud_consent).toBe(true);
+  });
+
+  it("does not resume a live run after unmount while consent is saving", async () => {
+    let finishConsent!: (profile: ProfileMetadata) => void;
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    vi.mocked(saveYouCamConsent).mockReturnValue(new Promise((resolve) => { finishConsent = resolve; }));
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
+    mockCapabilities("youcam", ["dress"]);
+
+    await renderApp();
+    await click("Try these products");
+    await act(async () => (host.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
+    await click("Agree and create live preview");
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/capabilities"))).toHaveLength(1);
+    act(() => root?.unmount());
+    root = null;
+    await act(async () => {
+      finishConsent({ ...fullBodyProfile, youcam_consented_at: "2026-08-16T00:00:00.000Z" });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/capabilities"))).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/tryons/batch"))).toBe(false);
+  });
+
+  it("labels completed live results without a mock fallback", async () => {
+    mockCapabilities("youcam", ["dress"]);
+    mockCompletedJob({ mock: false, result_url: "https://provider.example/result.jpg" });
+
+    await completeRun();
+
+    expect(host.textContent).toContain("YouCam AI preview");
+    expect(host.textContent).not.toContain("Mock AI preview");
+    expect(JSON.stringify((chrome.storage.local.set as ReturnType<typeof vi.fn>).mock.calls)).not.toContain("provider.example/result.jpg");
+  });
+
+  it("shows the provider failure and original listing", async () => {
+    mockCapabilities("youcam", ["dress"]);
+    mockCompletedJob({ status: "failed", mock: false, error_code: "invalid_product_image", error_message: "YouCam could not use this product image." });
+
+    await completeRun();
+
+    expect(host.textContent).toContain("YouCam could not use this product image.");
+    expect(host.textContent).not.toContain("Mock AI preview");
+    expect(host.querySelector('a[href="https://amazon.in/dp/DRESS"]')).not.toBeNull();
+  });
+
+  it("keeps mock mode and sends no cloud consent", async () => {
+    mockCapabilities("mock", []);
+    mockCompletedJob({ mock: true, result_url: "https://example.com/mock-result.jpg" });
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
+
+    await renderApp();
+    await click("Try these products");
+
+    expect(requestBody("/tryons/batch").cloud_consent).toBe(false);
+    expect(host.textContent).toContain("Mock AI preview");
+  });
+
   it("requires a product type selection before choosing its profile requirement", async () => {
     await renderApp();
 
@@ -131,7 +294,8 @@ describe("App", () => {
     (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
     vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
       const url = String(input);
-      const body = url.endsWith("/sessions") ? { session_id: "session" }
+      const body = url.endsWith("/capabilities") ? { tryon_provider: "mock", live_product_types: [] }
+        : url.endsWith("/sessions") ? { session_id: "session" }
         : url.endsWith("/profiles") ? { profile_id: "profile" }
           : url.endsWith("/products/normalize") ? { products: [{ ...product, product_type: "dress", id: "product" }] }
             : { detail: { code: "missing_profile_assets", roles: ["full_body_front"] } };
@@ -203,28 +367,55 @@ describe("App", () => {
     expect(host.textContent).toContain("products ready");
   });
 
-  it("shows a timeout error when previews keep processing", async () => {
+  it("polls processing jobs every two seconds", async () => {
     vi.useFakeTimers();
     vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
     vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
     (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
-    vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
-      const url = String(input);
-      const body = url.endsWith("/sessions") ? { session_id: "session" }
-        : url.endsWith("/profiles") ? { profile_id: "profile" }
-          : url.endsWith("/products/normalize") ? { products: [{ ...product, product_type: "dress", id: "product" }] }
-            : url.endsWith("/tryons/batch") ? { jobs: [{ job_id: "job", product_id: "product", status: "processing" }] }
-              : { job_id: "job", product_id: "product", status: "processing" };
-      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
-    }));
+    batchJob = { job_id: "job", product_id: "product", status: "processing", mock: true };
     await renderApp();
-    await act(async () => {
-      (host.querySelector("button") as HTMLButtonElement).click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    await click("Try these products");
+
+    const pollCount = () => fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/tryons/job")).length;
+    expect(pollCount()).toBe(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_999); });
+    expect(pollCount()).toBe(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(pollCount()).toBe(1);
+  });
+
+  it("stops after 40 polls with the timeout message", async () => {
+    vi.useFakeTimers();
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
+    batchJob = { job_id: "job", product_id: "product", status: "processing", mock: true };
+
+    await renderApp();
+    await click("Try these products");
+    await act(async () => { await vi.advanceTimersByTimeAsync(80_000); });
+
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/tryons/job"))).toHaveLength(40);
     expect(host.textContent).toContain("The preview is taking too long. Please try again.");
+  });
+
+  it("does not poll again after unmount", async () => {
+    vi.useFakeTimers();
+    vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
+    vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);
+    (chrome.tabs.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, products: [{ ...product, product_type: "dress" }] });
+    batchJob = { job_id: "job", product_id: "product", status: "processing", mock: true };
+
+    await renderApp();
+    await click("Try these products");
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    const pollsAtUnmount = fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/tryons/job")).length;
+    act(() => root?.unmount());
+    root = null;
+    await act(async () => { await vi.advanceTimersByTimeAsync(80_000); });
+
+    expect(pollsAtUnmount).toBe(1);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/tryons/job"))).toHaveLength(1);
   });
 
   it.each([

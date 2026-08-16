@@ -1,8 +1,12 @@
-import type { Product, TryOnJob } from "../types";
+import type { Product, ProductType, TryOnJob } from "../types";
 import type { ProfileAssetUpload, ProfileAttributes, RequirementKey } from "../profile/types";
 
 const baseUrl = "http://127.0.0.1:8001/v1";
 export type NormalizedProduct = Product & { id: string };
+export type Capabilities = {
+  tryon_provider: "mock" | "youcam";
+  live_product_types: ProductType[];
+};
 
 export class MissingProfileAssetsError extends Error {
   constructor(readonly roles: RequirementKey[]) {
@@ -51,7 +55,16 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
-export async function startDemo(assets: ProfileAssetUpload[], attributes: ProfileAttributes, products: Product[], signal?: AbortSignal) {
+export const getCapabilities = (signal?: AbortSignal) =>
+  json<Capabilities>("/capabilities", { signal });
+
+export async function startDemo(
+  assets: ProfileAssetUpload[],
+  attributes: ProfileAttributes,
+  products: Product[],
+  cloudConsent: boolean,
+  signal?: AbortSignal,
+) {
   const session = await json<{ session_id: string }>("/sessions", { method: "POST", body: "{}", signal });
   const profile = await json<{ profile_id: string }>("/profiles", {
     method: "POST",
@@ -70,6 +83,8 @@ export async function startDemo(assets: ProfileAssetUpload[], attributes: Profil
       session_id: session.session_id,
       profile_id: profile.profile_id,
       product_ids: normalized.products.map((product) => product.id),
+      assets,
+      cloud_consent: cloudConsent,
     }),
   });
   return { products: normalized.products, jobs: batch.jobs };
