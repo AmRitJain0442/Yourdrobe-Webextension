@@ -10,15 +10,18 @@ import {
   deleteLegacyImage,
   deleteProfile,
   loadActiveOutfit,
+  loadOutfitVersions,
   loadLegacyImage,
   loadOutfitItems,
   loadProfile,
   loadRequiredAssets,
   saveActiveOutfit,
+  saveCompiledOutfit,
   saveOutfitItem,
   saveAsset,
   saveAttributes,
   saveYouCamConsent,
+  selectOutfitVersion,
 } from "./store";
 
 let values: Record<string, unknown>;
@@ -149,6 +152,41 @@ describe("profile store", () => {
     expect((await loadActiveOutfit())?.image_data_url).toBe("data:image/png;base64,bmV3");
     await deleteActiveOutfit();
     expect(await loadActiveOutfit()).toBeNull();
+  });
+
+  it("preserves every compiled outfit and can restore an earlier version with its products", async () => {
+    const top = { platform: "amazon_in" as const, title: "Blue top", product_type: "top" as const, product_url: "https://amazon.in/dp/TOP", image_url: "https://images.example/top.jpg" };
+    const jeans = { platform: "flipkart" as const, title: "Black jeans", product_type: "bottom" as const, product_url: "https://flipkart.com/black-jeans/p/1", image_url: "https://images.example/jeans.jpg" };
+    await saveCompiledOutfit(new Blob(["top"], { type: "image/jpeg" }), outfitInput, top);
+    await saveCompiledOutfit(new Blob(["top-jeans"], { type: "image/jpeg" }), { ...outfitInput, job_id: "job-jeans", product_id: "product-jeans", product_title: "Black jeans", product_type: "bottom", product_url: jeans.product_url }, jeans);
+
+    const versions = await loadOutfitVersions();
+    expect(versions.map((version) => version.metadata.job_id)).toEqual(["job-top", "job-jeans"]);
+    expect(versions[0].items.map((item) => item.title)).toEqual(["Blue top"]);
+    expect(versions[1].items.map((item) => item.title)).toEqual(["Blue top", "Black jeans"]);
+
+    await selectOutfitVersion("job-top");
+    expect((await loadActiveOutfit())?.image_data_url).toBe("data:image/jpeg;base64,dG9w");
+    expect((await loadOutfitItems()).map((item) => item.title)).toEqual(["Blue top"]);
+  });
+
+  it("keeps accessory-only changes with the selected compiled outfit", async () => {
+    const top = { platform: "amazon_in" as const, title: "Blue top", product_type: "top" as const, product_url: "https://amazon.in/dp/TOP", image_url: "https://images.example/top.jpg" };
+    await saveCompiledOutfit(new Blob(["top"], { type: "image/jpeg" }), outfitInput, top);
+    await saveOutfitItem({ platform: "nykaa", title: "Gold earrings", product_type: "earrings", product_url: "https://nykaa.com/gold-earrings/p/1", image_url: "https://images.example/earrings.jpg" });
+
+    expect((await loadOutfitVersions())[0].items.map((item) => item.title)).toEqual(["Blue top", "Gold earrings"]);
+  });
+
+  it("clears the complete compiled-outfit history only on reset", async () => {
+    const top = { platform: "amazon_in" as const, title: "Blue top", product_type: "top" as const, product_url: "https://amazon.in/dp/TOP", image_url: "https://images.example/top.jpg" };
+    await saveCompiledOutfit(new Blob(["top"], { type: "image/jpeg" }), outfitInput, top);
+    expect(await loadOutfitVersions()).toHaveLength(1);
+
+    await deleteActiveOutfit();
+
+    expect(await loadOutfitVersions()).toEqual([]);
+    expect(await rawAsset("outfit_version:job-top")).toBeUndefined();
   });
 
   it.each([
@@ -543,7 +581,7 @@ describe("profile store", () => {
     expect(await rawAsset("feet_front")).toBeUndefined();
     expect(await rawAsset("active_outfit")).toBeUndefined();
     expect(chrome.storage.local.remove).toHaveBeenCalledOnce();
-    expect(chrome.storage.local.remove).toHaveBeenCalledWith(["yourdrobe_profile_v2", "yourdrobe_profile_image", "yourdrobe_active_outfit_v1", "yourdrobe_outfit_items_v1"]);
+    expect(chrome.storage.local.remove).toHaveBeenCalledWith(["yourdrobe_profile_v2", "yourdrobe_profile_image", "yourdrobe_active_outfit_v1", "yourdrobe_outfit_items_v1", "yourdrobe_outfit_versions_v1"]);
   });
 
   it("deletes the legacy image through its explicit path", async () => {

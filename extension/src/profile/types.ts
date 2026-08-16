@@ -73,6 +73,10 @@ export type ActiveOutfit = {
   image_data_url: string;
 };
 
+export type CompiledOutfit = ActiveOutfit & {
+  items: OutfitItem[];
+};
+
 export type ActiveOutfitInput = Pick<ActiveOutfitMetadata,
   "job_id" | "product_id" | "product_title" | "product_type" | "product_url"
 >;

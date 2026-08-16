@@ -1,6 +1,6 @@
 import type { ProductType } from "../types";
 import { prepareProfileImage } from "./image";
-import type { ActiveOutfit, ActiveOutfitInput, ActiveOutfitMetadata, OutfitItem, PhotoRole, PreparedProfileImage, ProfileAssetUpload, ProfileAttributes, ProfileMetadata } from "./types";
+import type { ActiveOutfit, ActiveOutfitInput, ActiveOutfitMetadata, CompiledOutfit, OutfitItem, PhotoRole, PreparedProfileImage, ProfileAssetUpload, ProfileAttributes, ProfileMetadata } from "./types";
 
 const databaseName = "yourdrobe_profile";
 const objectStoreName = "assets";
@@ -9,6 +9,8 @@ const legacyKey = "yourdrobe_profile_image";
 const activeOutfitBlobKey = "active_outfit";
 const activeOutfitMetadataKey = "yourdrobe_active_outfit_v1";
 const outfitItemsKey = "yourdrobe_outfit_items_v1";
+const outfitVersionsKey = "yourdrobe_outfit_versions_v1";
+const outfitVersionBlobKey = (jobId: string) => `outfit_version:${jobId}`;
 const acceptedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const acceptedActiveOutfitTypes = new Set(["image/jpeg", "image/png"]);
 const acceptedProductTypes = new Set<ProductType>([
@@ -19,6 +21,7 @@ const maxActiveOutfitBytes = 10 * 1024 * 1024;
 const platformHosts: Record<OutfitItem["platform"], string> = {
   amazon_in: "amazon.in", amazon_us: "amazon.com", flipkart: "flipkart.com", nykaa: "nykaa.com",
 };
+type StoredOutfitVersion = { metadata: ActiveOutfitMetadata; items: OutfitItem[] };
 
 let database: Promise<IDBDatabase> | undefined;
 let profileOperations: Promise<void> = Promise.resolve();
@@ -127,13 +130,84 @@ function isOutfitItem(value: unknown): value is OutfitItem {
   }
 }
 
-async function removeActiveOutfit(previousBlob?: Blob): Promise<void> {
+function isStoredOutfitVersion(value: unknown): value is StoredOutfitVersion {
+  if (!value || typeof value !== "object") return false;
+  const version = value as Record<string, unknown>;
+  return Object.keys(version).length === 2
+    && isActiveOutfitMetadata(version.metadata)
+    && Array.isArray(version.items)
+    && version.items.length <= 20
+    && version.items.every(isOutfitItem);
+}
+
+function activeOutfitMetadata(blob: Blob, input: ActiveOutfitInput): ActiveOutfitMetadata {
+  return {
+    version: 1,
+    job_id: input.job_id,
+    product_id: input.product_id,
+    product_title: input.product_title,
+    product_type: input.product_type,
+    product_url: input.product_url,
+    mime_type: blob.type as ActiveOutfitMetadata["mime_type"],
+    byte_size: blob.size,
+    saved_at: new Date().toISOString(),
+  };
+}
+
+function mergeOutfitItem(items: OutfitItem[], input: OutfitItem): OutfitItem[] {
+  const item = { ...input, title: input.title.trim() };
+  return [...items.filter((saved) => saved.product_type !== item.product_type), item].slice(-20);
+}
+
+async function storedOutfitVersions(): Promise<StoredOutfitVersion[]> {
+  const value = await chrome.storage.local.get(outfitVersionsKey);
+  const versions = value[outfitVersionsKey];
+  if (versions === undefined) return [];
+  if (!Array.isArray(versions) || versions.length > 50 || !versions.every(isStoredOutfitVersion)) {
+    await chrome.storage.local.remove(outfitVersionsKey);
+    return [];
+  }
+  return versions.map((version) => ({ metadata: { ...version.metadata }, items: version.items.map((item) => ({ ...item })) }));
+}
+
+async function loadOutfitVersionsUnlocked(): Promise<CompiledOutfit[]> {
+  const stored = await storedOutfitVersions();
+  const valid: StoredOutfitVersion[] = [];
+  const outfits: CompiledOutfit[] = [];
+  for (const version of stored) {
+    const blob = await transaction<Blob | undefined>("readonly", (store) => store.get(outfitVersionBlobKey(version.metadata.job_id)));
+    if (!blob || blob.type !== version.metadata.mime_type || blob.size !== version.metadata.byte_size) continue;
+    try { await validateActiveOutfitBlob(blob); } catch { continue; }
+    valid.push(version);
+    outfits.push({ metadata: { ...version.metadata }, items: version.items.map((item) => ({ ...item })), image_data_url: await dataUrl(blob) });
+  }
+  if (valid.length !== stored.length) await chrome.storage.local.set({ [outfitVersionsKey]: valid });
+  return outfits;
+}
+
+async function saveItemsWithActiveVersion(items: OutfitItem[]): Promise<void> {
+  const activeValue = await chrome.storage.local.get(activeOutfitMetadataKey);
+  const active = activeValue[activeOutfitMetadataKey];
+  const versions = await storedOutfitVersions();
+  const nextVersions = isActiveOutfitMetadata(active)
+    ? versions.map((version) => version.metadata.job_id === active.job_id ? { ...version, items } : version)
+    : versions;
+  await chrome.storage.local.set({ [outfitItemsKey]: items, [outfitVersionsKey]: nextVersions });
+}
+
+async function removeActiveOutfit(previousBlob?: Blob, clearVersions = false): Promise<void> {
+  const versions = clearVersions ? await storedOutfitVersions() : [];
   await transaction("readwrite", (store) => store.delete(activeOutfitBlobKey));
   try {
-    await chrome.storage.local.remove([activeOutfitMetadataKey, outfitItemsKey]);
+    await chrome.storage.local.remove(clearVersions
+      ? [activeOutfitMetadataKey, outfitItemsKey, outfitVersionsKey]
+      : [activeOutfitMetadataKey, outfitItemsKey]);
   } catch (error) {
     if (previousBlob) await transaction("readwrite", (store) => store.put(previousBlob, activeOutfitBlobKey));
     throw error;
+  }
+  for (const version of versions) {
+    await transaction("readwrite", (store) => store.delete(outfitVersionBlobKey(version.metadata.job_id)));
   }
 }
 
@@ -154,17 +228,7 @@ export function saveActiveOutfit(blob: Blob, input: ActiveOutfitInput): Promise<
     await validateActiveOutfitBlob(blob);
     const image_data_url = await dataUrl(blob);
     const previousBlob = await transaction<Blob | undefined>("readonly", (store) => store.get(activeOutfitBlobKey));
-    const metadata: ActiveOutfitMetadata = {
-      version: 1,
-      job_id: input.job_id,
-      product_id: input.product_id,
-      product_title: input.product_title,
-      product_type: input.product_type,
-      product_url: input.product_url,
-      mime_type: blob.type as ActiveOutfitMetadata["mime_type"],
-      byte_size: blob.size,
-      saved_at: new Date().toISOString(),
-    };
+    const metadata = activeOutfitMetadata(blob, input);
     await transaction("readwrite", (store) => store.put(blob, activeOutfitBlobKey));
     try {
       await chrome.storage.local.set({ [activeOutfitMetadataKey]: metadata });
@@ -205,7 +269,74 @@ export function loadActiveOutfit(): Promise<ActiveOutfit | null> {
 export function deleteActiveOutfit(): Promise<void> {
   return withProfileLock(async () => {
     const previousBlob = await transaction<Blob | undefined>("readonly", (store) => store.get(activeOutfitBlobKey));
-    await removeActiveOutfit(previousBlob);
+    await removeActiveOutfit(previousBlob, true);
+  });
+}
+
+export function loadOutfitVersions(): Promise<CompiledOutfit[]> {
+  return withProfileLock(loadOutfitVersionsUnlocked);
+}
+
+export function saveCompiledOutfit(blob: Blob, input: ActiveOutfitInput, item: OutfitItem): Promise<{ active: ActiveOutfit; items: OutfitItem[]; outfits: CompiledOutfit[] }> {
+  return withProfileLock(async () => {
+    if (!isOutfitItem(item)) throw new Error("Choose a product from a supported retailer.");
+    await validateActiveOutfitBlob(blob);
+    const image_data_url = await dataUrl(blob);
+    const metadata = activeOutfitMetadata(blob, input);
+    const previousBlob = await transaction<Blob | undefined>("readonly", (store) => store.get(activeOutfitBlobKey));
+    const activeValue = await chrome.storage.local.get(activeOutfitMetadataKey);
+    const previousMetadata = activeValue[activeOutfitMetadataKey];
+    const previousItems = await loadOutfitItems();
+    const items = mergeOutfitItem(previousItems, item);
+    const versions = await storedOutfitVersions();
+    const migrated = isActiveOutfitMetadata(previousMetadata) && previousBlob
+      && !versions.some((version) => version.metadata.job_id === previousMetadata.job_id)
+      ? [{ metadata: previousMetadata, items: previousItems }]
+      : [];
+    const nextVersions = [...versions, ...migrated].filter((version) => version.metadata.job_id !== metadata.job_id);
+    nextVersions.push({ metadata, items });
+    const createdKeys = [outfitVersionBlobKey(metadata.job_id)];
+    if (migrated.length && previousBlob) {
+      const key = outfitVersionBlobKey(migrated[0].metadata.job_id);
+      await transaction("readwrite", (store) => store.put(previousBlob, key));
+      createdKeys.push(key);
+    }
+    await transaction("readwrite", (store) => store.put(blob, outfitVersionBlobKey(metadata.job_id)));
+    await transaction("readwrite", (store) => store.put(blob, activeOutfitBlobKey));
+    try {
+      await chrome.storage.local.set({
+        [activeOutfitMetadataKey]: metadata,
+        [outfitItemsKey]: items,
+        [outfitVersionsKey]: nextVersions,
+      });
+    } catch (error) {
+      if (previousBlob) await transaction("readwrite", (store) => store.put(previousBlob, activeOutfitBlobKey));
+      else await transaction("readwrite", (store) => store.delete(activeOutfitBlobKey));
+      for (const key of createdKeys) await transaction("readwrite", (store) => store.delete(key));
+      throw error;
+    }
+    return { active: { metadata, image_data_url }, items, outfits: await loadOutfitVersionsUnlocked() };
+  });
+}
+
+export function selectOutfitVersion(jobId: string): Promise<CompiledOutfit> {
+  return withProfileLock(async () => {
+    const version = (await storedOutfitVersions()).find((candidate) => candidate.metadata.job_id === jobId);
+    if (!version) throw new Error("That saved outfit is no longer available.");
+    const blob = await transaction<Blob | undefined>("readonly", (store) => store.get(outfitVersionBlobKey(jobId)));
+    if (!blob || blob.type !== version.metadata.mime_type || blob.size !== version.metadata.byte_size) {
+      throw new Error("That saved outfit is no longer available.");
+    }
+    await validateActiveOutfitBlob(blob);
+    const previousBlob = await transaction<Blob | undefined>("readonly", (store) => store.get(activeOutfitBlobKey));
+    await transaction("readwrite", (store) => store.put(blob, activeOutfitBlobKey));
+    try {
+      await chrome.storage.local.set({ [activeOutfitMetadataKey]: version.metadata, [outfitItemsKey]: version.items });
+    } catch (error) {
+      if (previousBlob) await transaction("readwrite", (store) => store.put(previousBlob, activeOutfitBlobKey));
+      throw error;
+    }
+    return { metadata: version.metadata, items: version.items, image_data_url: await dataUrl(blob) };
   });
 }
 
@@ -234,9 +365,8 @@ export function saveOutfitItem(input: OutfitItem): Promise<OutfitItem[]> {
   return withProfileLock(async () => {
     if (!isOutfitItem(input)) throw new Error("Choose a product from a supported retailer.");
     const current = await loadOutfitItems();
-    const item = { ...input, title: input.title.trim() };
-    const next = [...current.filter((saved) => saved.product_type !== item.product_type), item].slice(-20);
-    await chrome.storage.local.set({ [outfitItemsKey]: next });
+    const next = mergeOutfitItem(current, input);
+    await saveItemsWithActiveVersion(next);
     return next;
   });
 }
@@ -244,7 +374,7 @@ export function saveOutfitItem(input: OutfitItem): Promise<OutfitItem[]> {
 export function removeOutfitItem(productUrl: string): Promise<OutfitItem[]> {
   return withProfileLock(async () => {
     const next = (await loadOutfitItems()).filter((item) => item.product_url !== productUrl);
-    await chrome.storage.local.set({ [outfitItemsKey]: next });
+    await saveItemsWithActiveVersion(next);
     return next;
   });
 }
@@ -366,7 +496,7 @@ export function saveYouCamConsent(): Promise<ProfileMetadata> {
 export function deleteProfile(): Promise<void> {
   return withProfileLock(async () => {
     await transaction("readwrite", (store) => store.clear());
-    await chrome.storage.local.remove([metadataKey, legacyKey, activeOutfitMetadataKey, outfitItemsKey]);
+    await chrome.storage.local.remove([metadataKey, legacyKey, activeOutfitMetadataKey, outfitItemsKey, outfitVersionsKey]);
   });
 }
 
