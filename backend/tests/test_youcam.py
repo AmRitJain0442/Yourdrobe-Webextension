@@ -297,6 +297,60 @@ class YouCamClientTest(unittest.TestCase):
         self.responses = [httpx.ConnectError("offline")]
         self.assertEqual(self.client.get_task("provider-task", 0), ProviderTaskState(status="processing"))
 
+    def test_downloads_allowed_result_image(self) -> None:
+        self.responses = [httpx.Response(200, content=b"image", headers={"content-type": "image/jpeg"})]
+        content, content_type = self.client.download_result(
+            "https://yce-us.s3-accelerate.amazonaws.com/demo/ttl30/result.jpg"
+        )
+        self.assertEqual((content, content_type), (b"image", "image/jpeg"))
+
+    def test_rejects_http_result_url(self) -> None:
+        with self.assertRaises(YouCamFailure) as raised:
+            self.client.download_result("http://yce-us.s3-accelerate.amazonaws.com/result.jpg")
+        self.assertEqual(raised.exception.code, "provider_result_unavailable")
+        self.assertEqual(self.requests, [])
+
+    def test_rejects_unapproved_result_host(self) -> None:
+        with self.assertRaises(YouCamFailure) as raised:
+            self.client.download_result("https://yce-us.s3-accelerate.amazonaws.com.evil.example/result.jpg")
+        self.assertEqual(raised.exception.code, "provider_result_unavailable")
+        self.assertEqual(self.requests, [])
+
+    def test_rejects_result_redirect_without_following_it(self) -> None:
+        requests = []
+
+        def redirect(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(302, headers={"location": "https://yce-eu.s3-accelerate.amazonaws.com/result.jpg"})
+
+        client = YouCamClient.from_value(
+            "first", httpx.Client(transport=httpx.MockTransport(redirect), follow_redirects=True),
+        )
+        with self.assertRaises(YouCamFailure) as raised:
+            client.download_result("https://yce-us.s3-accelerate.amazonaws.com/result.jpg")
+        self.assertEqual(raised.exception.code, "provider_result_unavailable")
+        self.assertEqual(len(requests), 1)
+
+    def test_rejects_non_200_result_response(self) -> None:
+        self.responses = [httpx.Response(404)]
+        with self.assertRaises(YouCamFailure) as raised:
+            self.client.download_result("https://yce-us.s3-accelerate.amazonaws.com/result.jpg")
+        self.assertEqual(raised.exception.code, "provider_result_unavailable")
+
+    def test_rejects_non_image_result_content_type(self) -> None:
+        self.responses = [httpx.Response(200, content=b"image", headers={"content-type": "text/html"})]
+        with self.assertRaises(YouCamFailure) as raised:
+            self.client.download_result("https://yce-us.s3-accelerate.amazonaws.com/result.jpg")
+        self.assertEqual(raised.exception.code, "provider_result_unavailable")
+
+    def test_rejects_result_at_image_size_limit(self) -> None:
+        self.responses = [httpx.Response(
+            200, content=b"x" * youcam.MAX_IMAGE_BYTES, headers={"content-type": "image/png"},
+        )]
+        with self.assertRaises(YouCamFailure) as raised:
+            self.client.download_result("https://yce-us.s3-accelerate.amazonaws.com/result.png")
+        self.assertEqual(raised.exception.code, "provider_result_unavailable")
+
 
 if __name__ == "__main__":
     unittest.main()

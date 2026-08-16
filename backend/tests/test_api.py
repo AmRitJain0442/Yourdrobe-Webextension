@@ -18,6 +18,7 @@ class FakeYouCam:
         self.created: list[tuple[str, str, str]] = []
         self.polled: list[tuple[str, int]] = []
         self.failure: YouCamFailure | None = None
+        self.download_failure: YouCamFailure | None = None
 
     def create_clothes_task(self, source: str, reference: str, category: str) -> StartedTask:
         self.created.append((source, reference, category))
@@ -28,6 +29,11 @@ class FakeYouCam:
     def get_task(self, task_id: str, key_index: int) -> ProviderTaskState:
         self.polled.append((task_id, key_index))
         return ProviderTaskState("completed", "https://provider.example/result.jpg")
+
+    def download_result(self, url: str) -> tuple[bytes, str]:
+        if self.download_failure:
+            raise self.download_failure
+        return b"rendered", "image/jpeg"
 
 
 class ApiJourneyTest(unittest.TestCase):
@@ -107,6 +113,68 @@ class ApiJourneyTest(unittest.TestCase):
         self.assertEqual(provider.polled, [("provider-task", 1)])
         self.assertNotIn("cGhvdG8", repr(jobs[job_id]))
         self.assertNotIn("Bearer", repr(jobs[job_id]))
+
+    def test_completed_live_result_image_returns_provider_bytes(self) -> None:
+        provider = FakeYouCam()
+        main.youcam = provider
+        product_id = self.create_product("unused", "dress")
+        job_id = self.client.post(
+            "/v1/tryons/batch", json=self.live_batch(product_id),
+        ).json()["jobs"][0]["job_id"]
+        completed = self.client.get(f"/v1/tryons/{job_id}").json()
+        response = self.client.get(f"/v1/tryons/{job_id}/result-image")
+        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"rendered")
+        self.assertEqual(response.headers["content-type"], "image/jpeg")
+        self.assertEqual(jobs[job_id]["result_url"], "https://provider.example/result.jpg")
+        self.assertTrue(jobs[job_id]["completed"])
+
+    def test_result_image_returns_404_for_unknown_job(self) -> None:
+        self.assertEqual(self.client.get("/v1/tryons/missing/result-image").status_code, 404)
+
+    def test_result_image_returns_409_for_queued_live_job(self) -> None:
+        main.youcam = FakeYouCam()
+        product_id = self.create_product("unused", "dress")
+        job_id = self.client.post(
+            "/v1/tryons/batch", json=self.live_batch(product_id),
+        ).json()["jobs"][0]["job_id"]
+        self.assertEqual(self.client.get(f"/v1/tryons/{job_id}/result-image").status_code, 409)
+
+    def test_result_image_returns_409_for_failed_live_job(self) -> None:
+        provider = FakeYouCam()
+        provider.failure = YouCamFailure("provider_processing_failed", "YouCam could not create this preview.")
+        main.youcam = provider
+        product_id = self.create_product("unused", "dress")
+        job_id = self.client.post(
+            "/v1/tryons/batch", json=self.live_batch(product_id),
+        ).json()["jobs"][0]["job_id"]
+        self.assertEqual(self.client.get(f"/v1/tryons/{job_id}/result-image").status_code, 409)
+
+    def test_result_image_returns_409_for_mock_job(self) -> None:
+        product_id = self.create_product("unused", "dress")
+        job_id = self.client.post(
+            "/v1/tryons/batch", json=self.live_batch(product_id),
+        ).json()["jobs"][0]["job_id"]
+        self.assertEqual(self.client.get(f"/v1/tryons/{job_id}/result-image").status_code, 409)
+
+    def test_result_image_maps_provider_download_failure_to_safe_502(self) -> None:
+        provider = FakeYouCam()
+        main.youcam = provider
+        product_id = self.create_product("unused", "dress")
+        job_id = self.client.post(
+            "/v1/tryons/batch", json=self.live_batch(product_id),
+        ).json()["jobs"][0]["job_id"]
+        self.client.get(f"/v1/tryons/{job_id}")
+        provider.download_failure = YouCamFailure(
+            "provider_result_unavailable", "This YouCam result is no longer available.",
+        )
+        response = self.client.get(f"/v1/tryons/{job_id}/result-image")
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], {
+            "code": "provider_result_unavailable",
+            "message": "This YouCam result is no longer available.",
+        })
 
     def test_live_categories_map_to_provider_garments(self) -> None:
         provider = FakeYouCam()

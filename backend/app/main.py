@@ -3,7 +3,7 @@ from typing import Literal, TypeVar
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field, StrictBool
 
 from app.youcam import ProviderTaskState, YouCamClient, YouCamFailure
@@ -299,10 +299,20 @@ def get_tryon(job_id: str) -> dict:
             "error_message": job["error_message"],
             "mock": False,
         }
+    if job.get("completed") is True:
+        return {
+            "job_id": job_id,
+            "product_id": job["product_id"],
+            "status": "completed",
+            "result_url": job["result_url"],
+            "mock": False,
+        }
     state: ProviderTaskState = youcam.get_task(job["provider_task_id"], job["provider_key_index"])
     if state.status == "processing":
         return {"job_id": job_id, "product_id": job["product_id"], "status": "processing", "progress": 50, "mock": False}
     if state.status == "completed":
+        job["result_url"] = state.result_url
+        job["completed"] = True
         return {
             "job_id": job_id,
             "product_id": job["product_id"],
@@ -318,3 +328,21 @@ def get_tryon(job_id: str) -> dict:
         "error_message": state.error_message or "YouCam could not complete this preview.",
         "mock": False,
     }
+
+
+@app.get("/v1/tryons/{job_id}/result-image")
+def get_tryon_result_image(job_id: str) -> Response:
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Try-on job not found")
+    if not (
+        job.get("mock") is False
+        and job.get("completed") is True
+        and isinstance(job.get("result_url"), str)
+    ):
+        raise HTTPException(409, "Try-on result is not available")
+    try:
+        content, media_type = youcam.download_result(job["result_url"])
+    except YouCamFailure as failure:
+        raise HTTPException(502, {"code": failure.code, "message": str(failure)}) from None
+    return Response(content=content, media_type=media_type)

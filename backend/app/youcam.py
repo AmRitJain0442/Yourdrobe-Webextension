@@ -138,6 +138,32 @@ class YouCamClient:
             return self._failed(self._error_code(response, "provider_processing_failed"))
         return ProviderTaskState(status="processing")
 
+    def download_result(self, url: str) -> tuple[bytes, str]:
+        failure = YouCamFailure(
+            "provider_result_unavailable", "This YouCam result is no longer available.",
+        )
+        try:
+            parsed = urlparse(url)
+            hostname = parsed.hostname or ""
+            if (
+                parsed.scheme != "https"
+                or not hostname.startswith("yce-")
+                or not hostname.endswith(".s3-accelerate.amazonaws.com")
+            ):
+                raise failure
+            with self._client.stream("GET", url, follow_redirects=False) as response:
+                content_type = response.headers.get("content-type", "").partition(";")[0].strip().lower()
+                if response.status_code != 200 or content_type not in ("image/jpeg", "image/png"):
+                    raise failure
+                content = bytearray()
+                for chunk in response.iter_bytes():
+                    content.extend(chunk)
+                    if len(content) >= MAX_IMAGE_BYTES:
+                        raise failure
+                return bytes(content), content_type
+        except (httpx.HTTPError, ValueError):
+            raise failure from None
+
     @staticmethod
     def _is_https(value: str) -> bool:
         try:
