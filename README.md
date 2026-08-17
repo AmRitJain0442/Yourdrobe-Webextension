@@ -491,6 +491,24 @@ backend reports `"tryon_provider": "mock"` with an empty list.
 6. Pick the next product and repeat to layer the outfit
 7. Select **Finalize outfit in this tab** to add everything to the retailer cart
 
+### Hosted backend on Cloud Run
+
+The backend includes a non-root production container and an idempotent PowerShell deployment
+script. The script uses a dedicated Cloud Run service identity for Vertex AI and reads the YouCam
+key from Secret Manager; neither credential is copied into the image.
+
+Create `yourdrobe-youcam-api-keys` in the hosting project and add a version containing only the
+Bearer API key. Then deploy from the repository root:
+
+```powershell
+.\backend\deploy-gcp.ps1
+```
+
+The initial deployment intentionally requires Google Cloud IAM authentication. Keep it private
+until application-level user authentication, ownership checks, and quotas are implemented; making
+the current demo API anonymous would expose paid provider operations to abuse. After those controls
+exist, the same service can be made public for extension traffic.
+
 ---
 
 ## Configuration reference
