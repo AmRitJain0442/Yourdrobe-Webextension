@@ -19,6 +19,21 @@ function Invoke-Gcloud {
     }
 }
 
+function Invoke-GcloudWithRetry {
+    for ($attempt = 1; $attempt -le 6; $attempt++) {
+        try {
+            Invoke-Gcloud @args
+            return
+        }
+        catch {
+            if ($attempt -eq 6) {
+                throw
+            }
+            Start-Sleep -Seconds 5
+        }
+    }
+}
+
 Invoke-Gcloud services enable `
     run.googleapis.com `
     cloudbuild.googleapis.com `
@@ -42,13 +57,15 @@ if (-not $existingServiceAccount) {
 Invoke-Gcloud projects add-iam-policy-binding $VertexProjectId `
     --member "serviceAccount:$serviceAccount" `
     --role roles/aiplatform.user `
-    --condition None
+    --condition None `
+    --format none
 
-Invoke-Gcloud secrets add-iam-policy-binding $SecretName `
+Invoke-GcloudWithRetry secrets add-iam-policy-binding $SecretName `
     --project $ProjectId `
     --member "serviceAccount:$serviceAccount" `
     --role roles/secretmanager.secretAccessor `
-    --condition None
+    --condition None `
+    --format none
 
 Invoke-Gcloud run deploy $ServiceName `
     --project $ProjectId `
