@@ -26,8 +26,14 @@ Invoke-Gcloud services enable `
     secretmanager.googleapis.com `
     --project $ProjectId
 
-& gcloud iam service-accounts describe $serviceAccount --project $ProjectId *> $null
+$existingServiceAccount = & gcloud iam service-accounts list `
+    --project $ProjectId `
+    --filter "email=$serviceAccount" `
+    --format "value(email)"
 if ($LASTEXITCODE -ne 0) {
+    throw "Could not inspect service accounts in $ProjectId."
+}
+if (-not $existingServiceAccount) {
     Invoke-Gcloud iam service-accounts create $serviceAccountName `
         --project $ProjectId `
         --display-name "Yourdrobe API runtime"
