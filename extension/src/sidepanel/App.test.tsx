@@ -870,7 +870,7 @@ describe("App", () => {
     expect(saveCompiledOutfit).not.toHaveBeenCalled();
     expect(host.querySelector("article.active-outfit")?.textContent).toContain("Saved linen top");
     const message = host.querySelector('[role="alert"]')?.textContent ?? "";
-    expect(message).toContain("local backend");
+    expect(message).toContain("Yourdrobe service");
     expect(message).not.toContain("provider.example");
   });
 
@@ -892,7 +892,7 @@ describe("App", () => {
     await vi.advanceTimersByTimeAsync(9_999);
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
-    await expect(pending).rejects.toThrow("The local backend took too long. Please try again.");
+    await expect(pending).rejects.toThrow("The Yourdrobe service took too long. Please try again.");
   });
 
   it("does not show the listing image as a completed live result", async () => {
@@ -1150,10 +1150,10 @@ describe("App", () => {
   });
 
   it.each([
-    ["network", () => Promise.reject(new TypeError("Failed to fetch")), "The local backend is unavailable. Start it and try again."],
-    ["response body network", () => Promise.resolve({ ok: true, text: () => Promise.reject(new TypeError("Network connection lost")) } as Response), "The local backend is unavailable. Start it and try again."],
-    ["timeout", () => Promise.reject(new DOMException("The operation was aborted due to timeout", "TimeoutError")), "The local backend took too long. Please try again."],
-    ["non-JSON", () => Promise.resolve(new Response("Bad gateway", { status: 502 })), "The local backend could not process the request. Please try again."],
+    ["network", () => Promise.reject(new TypeError("Failed to fetch")), "The Yourdrobe service is unavailable. Please try again."],
+    ["response body network", () => Promise.resolve({ ok: true, text: () => Promise.reject(new TypeError("Network connection lost")) } as Response), "The Yourdrobe service is unavailable. Please try again."],
+    ["timeout", () => Promise.reject(new DOMException("The operation was aborted due to timeout", "TimeoutError")), "The Yourdrobe service took too long. Please try again."],
+    ["non-JSON", () => Promise.resolve(new Response("Bad gateway", { status: 502 })), "The Yourdrobe service could not process the request. Please try again."],
   ])("shows an actionable %s backend error", async (_label, fetchResult, expected) => {
     vi.mocked(loadProfile).mockResolvedValue(fullBodyProfile);
     vi.mocked(loadRequiredAssets).mockResolvedValue([{ kind: "full_body_front", image_data_url: "data:image/png;base64,profile" }]);

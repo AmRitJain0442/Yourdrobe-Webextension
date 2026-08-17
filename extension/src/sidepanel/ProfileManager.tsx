@@ -72,7 +72,7 @@ export function ProfileManager({ profile, legacyImage, onChanged, onClose }: Pro
     <div className="profile-heading"><h2>Manage your profile</h2><button type="button" className="secondary" disabled={busy} onClick={onClose}>Close</button></div>
     <p className="profile-completion">{roles.filter((role) => assets[role]).length} of {roles.length} required photos saved.</p>
     <button type="button" disabled={busy} onClick={() => setReplacing(true)}>Replace from one full-body photo</button>
-    {(legacyImage || !profile) && <label className="check"><input type="checkbox" disabled={busy} checked={consent} onChange={(event) => setConsent(event.target.checked)} />I agree to browser-local profile storage and per-run transmission of required photos to 127.0.0.1:8001.</label>}
+    {(legacyImage || !profile) && <label className="check"><input type="checkbox" disabled={busy} checked={consent} onChange={(event) => setConsent(event.target.checked)} />I agree to browser-local profile storage and per-run transmission of required photos to the Yourdrobe cloud service and its AI processing providers.</label>}
     <div className="list">{roles.map((role) => {
       const asset = assets[role];
       return <article className="profile-asset" key={role}>

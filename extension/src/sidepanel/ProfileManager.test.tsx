@@ -75,7 +75,7 @@ describe("ProfileManager", () => {
   it("assigns the legacy image to the selected role", async () => {
     const { onChanged } = await renderManager();
     expect(host.textContent).toContain("browser-local profile storage and per-run transmission");
-    expect(host.textContent).toContain("127.0.0.1:8001");
+    expect(host.textContent).toContain("Yourdrobe cloud service and its AI processing providers");
     const select = host.querySelector("select") as HTMLSelectElement;
     await act(async () => { select.value = "full_body_side"; select.dispatchEvent(new Event("change", { bubbles: true })); });
     await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent === "Assign photo")?.click(); });

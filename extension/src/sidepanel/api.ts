@@ -37,17 +37,17 @@ async function json<T>(path: string, init?: RequestInit, timeoutMs = requestTime
     raw = await response.text();
   } catch (reason) {
     if (reason instanceof DOMException && (reason.name === "AbortError" || reason.name === "TimeoutError")) {
-      throw new Error("The local backend took too long. Please try again.");
+      throw new Error("The Yourdrobe service took too long. Please try again.");
     }
-    throw new Error("The local backend is unavailable. Start it and try again.");
+    throw new Error("The Yourdrobe service is unavailable. Please try again.");
   }
   let body: T;
   try {
     body = JSON.parse(raw) as T;
   } catch {
     throw new Error(response.ok
-      ? "The local backend returned an unexpected response. Restart it and try again."
-      : "The local backend could not process the request. Please try again.");
+      ? "The Yourdrobe service returned an unexpected response. Please try again."
+      : "The Yourdrobe service could not process the request. Please try again.");
   }
   if (!response.ok) {
     const detail = (body as { detail?: unknown }).detail;
@@ -61,7 +61,7 @@ async function json<T>(path: string, init?: RequestInit, timeoutMs = requestTime
     if (path === "/profiles/generate-assets" && typeof detail === "string" && detail.length <= 200) {
       throw new Error(detail);
     }
-    throw new Error("The local backend could not process the request. Please try again.");
+    throw new Error("The Yourdrobe service could not process the request. Please try again.");
   }
   return body;
 }
@@ -76,7 +76,7 @@ export async function generateProfileAssets(imageDataUrl: string, signal?: Abort
     body: JSON.stringify({ image_data_url: imageDataUrl, cloud_consent: true }),
   }, profileGenerationTimeoutMs);
   if (!Array.isArray(result.assets) || result.assets.length !== profilePhotoRoles.length) {
-    throw new Error("The local backend returned an incomplete generated profile.");
+    throw new Error("The Yourdrobe service returned an incomplete generated profile.");
   }
   const assets = result.assets.filter((asset): asset is ProfileAssetUpload => {
     if (!asset || typeof asset !== "object") return false;
@@ -87,7 +87,7 @@ export async function generateProfileAssets(imageDataUrl: string, signal?: Abort
   });
   if (assets.length !== profilePhotoRoles.length
     || new Set(assets.map((asset) => asset.kind)).size !== profilePhotoRoles.length) {
-    throw new Error("The local backend returned an incomplete generated profile.");
+    throw new Error("The Yourdrobe service returned an incomplete generated profile.");
   }
   return profilePhotoRoles.map((role) => assets.find((asset) => asset.kind === role)!);
 }
@@ -101,19 +101,19 @@ export async function getResultImage(jobId: string, signal?: AbortSignal): Promi
     response = await fetch(`${baseUrl}/tryons/${encodeURIComponent(jobId)}/result-image`, { signal: requestSignal });
   } catch (reason) {
     if (reason instanceof DOMException && (reason.name === "AbortError" || reason.name === "TimeoutError")) {
-      throw new Error("The local backend took too long. Please try again.");
+      throw new Error("The Yourdrobe service took too long. Please try again.");
     }
-    throw new Error("The local backend is unavailable. Start it and try again.");
+    throw new Error("The Yourdrobe service is unavailable. Please try again.");
   }
-  if (!response.ok) throw new Error("The local backend could not provide that preview. Please try again.");
+  if (!response.ok) throw new Error("The Yourdrobe service could not provide that preview. Please try again.");
   let blob: Blob;
   try {
     blob = await response.blob();
   } catch {
-    throw new Error("The local backend could not provide that preview. Please try again.");
+    throw new Error("The Yourdrobe service could not provide that preview. Please try again.");
   }
   if (!acceptedResultImageTypes.has(blob.type) || !blob.size || blob.size >= maxResultImageBytes) {
-    throw new Error("The local backend could not provide that preview. Please try again.");
+    throw new Error("The Yourdrobe service could not provide that preview. Please try again.");
   }
   return blob;
 }

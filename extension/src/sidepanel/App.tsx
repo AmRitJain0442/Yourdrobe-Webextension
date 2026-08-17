@@ -271,7 +271,7 @@ export function App() {
         setPhase("profile-setup");
         return;
       }
-      setError(reason instanceof Error ? reason.message : "The local backend is unavailable.");
+      setError(reason instanceof Error ? reason.message : "The Yourdrobe service is unavailable.");
       setPhase("error");
     } finally {
       if (pollDeadlineTimer) clearTimeout(pollDeadlineTimer);
