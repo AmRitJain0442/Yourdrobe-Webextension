@@ -1,6 +1,8 @@
 # YourDrobe
 
-![YourDrobe name and logo](https://storage.googleapis.com/yourdrobe-public-assets-635367932686/brand/yourdrobe-lockup.png)
+<p align="center">
+  <img src="https://storage.googleapis.com/yourdrobe-public-assets-635367932686/brand/yourdrobe-lockup-banner.png" alt="YourDrobe name and logo" width="420">
+</p>
 
 ## Description
 
