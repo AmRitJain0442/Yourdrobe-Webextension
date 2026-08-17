@@ -2,7 +2,8 @@ import type { Product, ProductType, TryOnJob } from "../types";
 import type { ProfileAssetUpload, ProfileAttributes, RequirementKey } from "../profile/types";
 import { profilePhotoRoles } from "../profile/requirements";
 
-const baseUrl = "http://127.0.0.1:8001/v1";
+export const baseUrl = (import.meta.env.VITE_API_BASE_URL
+  || "https://yourdrobe-api-jiayjiprgq-el.a.run.app/v1").replace(/\/$/, "");
 const requestTimeoutMs = 10_000;
 const batchTimeoutMs = 300_000;
 const profileGenerationTimeoutMs = 300_000;

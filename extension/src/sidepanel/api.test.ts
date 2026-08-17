@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProfileAssetUpload } from "../profile/types";
 import type { Product } from "../types";
-import { generateProfileAssets, startDemo } from "./api";
+import { baseUrl, generateProfileAssets, startDemo } from "./api";
 
 const asset: ProfileAssetUpload = {
   kind: "full_body_front",
@@ -22,6 +22,10 @@ afterEach(() => {
 });
 
 describe("startDemo", () => {
+  it("uses the hosted API by default", () => {
+    expect(baseUrl).toBe("https://yourdrobe-api-jiayjiprgq-el.a.run.app/v1");
+  });
+
   it("sends the active outfit only as the batch base image", async () => {
     const fetchMock = vi.fn((input: string | URL | Request, _init?: RequestInit) => {
       const url = String(input);

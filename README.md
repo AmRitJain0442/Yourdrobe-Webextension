@@ -411,6 +411,9 @@ npm.cmd run build
 Set-Location ..
 ```
 
+Production builds use the hosted POC API by default. To build against a backend running on your
+machine, copy `extension/.env.example` to `extension/.env.local` before running the build.
+
 Run `npm install` from inside `extension/`. Unlike `run` and `test`, npm's `install` reads
 `package.json` from the current directory rather than from `--prefix`, so
 `npm --prefix extension install` fails at the repository root.

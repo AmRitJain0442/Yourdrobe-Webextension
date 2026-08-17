@@ -9,6 +9,7 @@
     "https://*.amazon.com/*",
     "https://*.flipkart.com/*",
     "https://*.nykaa.com/*",
+    "https://yourdrobe-api-jiayjiprgq-el.a.run.app/*",
     "http://127.0.0.1:8001/*"
   ],
   "background": { "service_worker": "assets/background.js", "type": "module" },
