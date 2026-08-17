@@ -411,8 +411,9 @@ npm.cmd run build
 Set-Location ..
 ```
 
-Production builds use the hosted POC API by default. To build against a backend running on your
-machine, copy `extension/.env.example` to `extension/.env.local` before running the build.
+Production builds use the hosted POC API and request only its host permission. To build against a
+backend running on your machine, copy `extension/.env.example` to `extension/.env.local` before
+running the build; Vite then adds the localhost permission to that local build only.
 
 Run `npm install` from inside `extension/`. Unlike `run` and `test`, npm's `install` reads
 `package.json` from the current directory rather than from `--prefix`, so
