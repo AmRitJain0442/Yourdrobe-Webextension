@@ -11,6 +11,7 @@ youcam-creds.txt
 !.env.example
 node_modules/
 dist/
+release/
 __pycache__/
 *.py[cod]
 .venv/
