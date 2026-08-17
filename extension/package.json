@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit && vite build",
+    "capture:store": "node scripts/capture-store-screenshot.mjs",
     "test": "vitest run"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "@vitejs/plugin-react": "^6.0.5",
     "fake-indexeddb": "^6.2.4",
     "jsdom": "^29.1.1",
+    "puppeteer-core": "^25.4.0",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
     "vitest": "^4.1.10"
