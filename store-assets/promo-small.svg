@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="280" viewBox="0 0 440 280" role="img" aria-label="Yourdrobe AI Try-On">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#21162f"/>
+      <stop offset="0.52" stop-color="#44234f"/>
+      <stop offset="1" stop-color="#7150c9"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f43f7a"/>
+      <stop offset="0.55" stop-color="#ff5d9a"/>
+      <stop offset="1" stop-color="#7c5cfa"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#160c25" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+  <rect width="440" height="280" fill="url(#background)"/>
+  <circle cx="382" cy="30" r="120" fill="#ff6ca7" opacity="0.10"/>
+  <circle cx="418" cy="262" r="150" fill="#9f85ff" opacity="0.13"/>
+  <path d="M0 236 C100 194 154 275 265 225 C337 193 381 204 440 226 V280 H0 Z" fill="#ffffff" opacity="0.05"/>
+  <g transform="translate(38 42)" filter="url(#shadow)">
+    <rect width="92" height="92" rx="24" fill="url(#tile)"/>
+    <path d="M69 20 Q71 28 79 30 Q71 32 69 40 Q67 32 59 30 Q67 28 69 20 Z" fill="#ffffff" opacity="0.70"/>
+    <g fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M46 40 V34 C46 29 42 26 38 28 C35 30 35 34 38 35"/>
+      <path d="M46 40 L20 65 H72 Z"/>
+    </g>
+  </g>
+  <text x="151" y="76" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="2.6" fill="#ff9dc1">AI TRY-ON</text>
+  <text x="151" y="111" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="32" font-weight="760" letter-spacing="0.5" fill="#ffffff">YOURDROBE</text>
+  <text x="40" y="174" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="23" font-weight="650" fill="#ffffff">Your fitting room, anywhere.</text>
+  <text x="40" y="203" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="14" fill="#d9cfe8">Preview fashion while you shop.</text>
+  <g transform="translate(40 229)">
+    <rect width="264" height="29" rx="14.5" fill="#ffffff" opacity="0.10"/>
+    <text x="15" y="19.5" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="11.5" font-weight="600" letter-spacing="0.3" fill="#f7f2ff">AMAZON  •  FLIPKART  •  NYKAA</text>
+  </g>
+  <path d="M374 93 Q377 106 390 109 Q377 112 374 125 Q371 112 358 109 Q371 106 374 93 Z" fill="#ffffff" opacity="0.55"/>
+</svg>
