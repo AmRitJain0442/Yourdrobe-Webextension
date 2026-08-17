@@ -53,7 +53,8 @@ class NanoBananaClient:
     def from_environment(cls) -> "NanoBananaClient":
         load_dotenv(ENV_FILE, override=False)
         credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
-        if not credentials_path or not Path(credentials_path).is_file():
+        adc_enabled = os.getenv("GOOGLE_GENAI_ENABLED", "").strip().lower() in {"1", "true", "yes"}
+        if not adc_enabled and (not credentials_path or not Path(credentials_path).is_file()):
             return cls(None, os.getenv("NANO_BANANA_MODEL", "gemini-3.1-flash-image"))
 
         def create_client():

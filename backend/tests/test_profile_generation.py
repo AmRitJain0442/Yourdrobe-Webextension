@@ -1,5 +1,7 @@
 import base64
+import os
 import unittest
+from unittest.mock import patch
 
 from app.profile_generation import MAX_IMAGE_BYTES, NanoBananaClient, ProfileGenerationFailure, PROFILE_ROLES
 
@@ -54,6 +56,23 @@ class FailingGenAI:
 
 
 class NanoBananaClientTest(unittest.TestCase):
+    def test_cloud_runtime_can_enable_application_default_credentials_without_a_key_file(self) -> None:
+        environment = {
+            "GOOGLE_GENAI_ENABLED": "true",
+            "GOOGLE_CLOUD_PROJECT": "example-project",
+        }
+
+        with patch.dict(os.environ, environment, clear=True), patch("app.profile_generation.load_dotenv"):
+            client = NanoBananaClient.from_environment()
+
+        self.assertTrue(client.enabled)
+
+    def test_local_runtime_stays_disabled_without_an_explicit_credential(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), patch("app.profile_generation.load_dotenv"):
+            client = NanoBananaClient.from_environment()
+
+        self.assertFalse(client.enabled)
+
     def test_reports_quota_failures_without_exposing_provider_details(self) -> None:
         source = "data:image/png;base64," + base64.b64encode(b"source").decode()
 
