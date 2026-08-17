@@ -507,10 +507,11 @@ Bearer API key. Then deploy from the repository root:
 .\backend\deploy-gcp.ps1
 ```
 
-The initial deployment intentionally requires Google Cloud IAM authentication. Keep it private
-until application-level user authentication, ownership checks, and quotas are implemented; making
-the current demo API anonymous would expose paid provider operations to abuse. After those controls
-exist, the same service can be made public for extension traffic.
+The POC deployment allows anonymous requests so an unpacked or published extension can call it
+without sign-in. It is deliberately capped at one Cloud Run instance, but every caller shares the
+configured YouCam and Vertex quotas. Treat the URL as public, monitor provider usage and billing,
+and switch back to `--no-allow-unauthenticated` before using this deployment beyond a controlled
+demo.
 
 ---
 

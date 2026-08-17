@@ -80,7 +80,7 @@ Invoke-Gcloud run deploy $ServiceName `
     --timeout 300 `
     --min 0 `
     --max 1 `
-    --no-allow-unauthenticated `
+    --allow-unauthenticated `
     --quiet
 
 Invoke-Gcloud run services describe $ServiceName `
