@@ -3,6 +3,9 @@ my-product-sa-key.json
 *-service-account*.json
 *-sa-key.json
 gen-lang-client-*.json
+GCP_MODELS_USAGE.md
+youcam-creds.txt
+*-creds.txt
 .env
 .env.*
 !.env.example
